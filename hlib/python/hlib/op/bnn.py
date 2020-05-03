@@ -7,8 +7,56 @@ from .nn import pad, get_pad_tuple, simplify
 
 dtype = hcl.Float()
 
-def if_mac(y, x, out_h, out_w, pad_top, pad_left, pad_down, pad_right):
-    return tvm.all(x >= pad_left, x < out_w - pad_right, y >= pad_top, y < out_h - pad_down)
+def if_mac(y, x, in_h, in_w, pad_top, pad_left, pad_down, pad_right):
+    return tvm.all(x >= pad_left, x < in_w - pad_right, y >= pad_top, y < in_h - pad_down)
+
+def flatten(data, name="flatten"):
+    ishape = data.shape
+    dim = 1
+    for i in range(1, len(ishape)):
+        dim = dim * ishape[i]
+    oshape = (ishape[0], dim)
+
+    def unwrap(idx, shape): # channel first
+        index = [idx % shape[0], idx / (shape[0]*shape[1]), (idx / shape[0]) % shape[1]]
+        return index
+
+    return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
+        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('flatten'))]))
+
+def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
+    assert len(
+        data.shape) == 2 and len(
+        weight.shape) == 2, "only support 2-dim dense"
+    if bias is not None:
+        assert len(bias.shape) == 1
+    batch, in_dim = data.shape
+    out_dim, _ = weight.shape
+    k = hcl.reduce_axis(0, in_dim)
+    var_w = tvm.sqrt(2. / in_dim) # ?
+    # var_w = 1
+    attrs = OrderedDict([
+        ('k', in_dim),
+        ('j', out_dim),
+        ('i', batch),
+        ('app_name', tvm.make.StringImm('mm'))])
+    matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
+        (data[i, k] == weight[j, k]) * 2 - 1, axis=k) * var_w, # xnor
+        name=name, attrs=attrs)
+    if bias is not None:
+        matmul = hcl.compute(
+            (batch, out_dim),
+            lambda i, j: matmul[i, j] + bias[j],
+            name=name,
+            attrs=attrs)
+    if use_relu:
+        matmul = hcl.compute(
+            (batch, out_dim),
+            lambda i, j: tvm.select(matmul[i, j] > 0, 1, 0),
+            name=name,
+            attrs=attrs
+        )
+    return matmul
 
 def conv2d_nchw(
         Input,
@@ -69,8 +117,8 @@ def conv2d_nchw(
         lambda nn, ff, yy, xx: hcl.sum(
             tvm.select(if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right),
             ((1-(temp[nn, rc, yy * stride_h + ry * dilation_h,
-                 xx * stride_w + rx * dilation_w] ^
-            Filter[ff, rc, ry, rx])) << 1) - 1, # xnor
+                 xx * stride_w + rx * dilation_w] !=
+            Filter[ff, rc, ry, rx])) * 2) - 1, # xnor
             0), # neglect padding pixels in mac
             axis=[rc, ry, rx], dtype=out_dtype),
             name=name,
@@ -109,7 +157,6 @@ def max_pool2d_nchw(
         (width - pooling_w + pad_left + pad_right) // stride_w + 1)
     dheight = hcl.reduce_axis(0, pooling_h)
     dwidth = hcl.reduce_axis(0, pooling_w)
-    print(out_height,out_width)
     return hcl.compute(
         (batch, channel, out_height, out_width),
         lambda i, c, h, w: tvm.select(max(data[i, c, h *
@@ -134,6 +181,7 @@ def batch_norm(
         beta,
         moving_mean,
         moving_var,
+        M0=1,
         axis=1,
         epsilon=10**-5,
         center=1,
@@ -166,7 +214,7 @@ def batch_norm(
         indices = list(indices[0])
         return (indices[axis],)
 
-    var_w = 1 #tvm.sqrt(2. / 9.) # No sure why var_w is needed
+    var_w = tvm.sqrt(2. / (9. * M0)) # No sure why var_w is needed
     out = hcl.compute(data.shape, lambda *x: tvm.select(
                     (data[x] * var_w - moving_mean[get_axis(axis, x)]) /
                     (hcl.sqrt(moving_var[get_axis(axis, x)] + epsilon)) * gamma[get_axis(axis, x)]
