@@ -76,3 +76,101 @@ def conv2d_nchw(
             name=name,
             dtype=out_dtype)
     return out
+
+def max_pool2d_nchw(
+        data,
+        pooling=[1, 1],
+        stride=[1, 1],
+        padding=[0, 0],
+        layout='NCHW',
+        name='binary_max_pool2d'):
+    assert len(data.shape) == 4, "only support 4-dim pooling"
+    assert len(stride) == 2, "only support 2-dim stride"
+    max = hcl.reducer(
+        tvm.min_value(data.dtype),
+        lambda x, y: tvm.make.Max(x, y),
+        data.dtype)
+    pooling_h, pooling_w = pooling
+    stride_h, stride_w = stride
+    batch, channel, height, width = data.shape
+    if len(padding) == 4:
+        pad_top = padding[0]
+        pad_left = padding[1]
+        pad_bottom = padding[2]
+        pad_right = padding[3]
+    else:
+        pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (pooling_h, pooling_w))
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_bottom, pad_right]
+    data = pad(data, pad_before, pad_after, pad_value=tvm.min_value(data.dtype))
+    out_height = simplify(
+        (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
+    out_width = simplify(
+        (width - pooling_w + pad_left + pad_right) // stride_w + 1)
+    dheight = hcl.reduce_axis(0, pooling_h)
+    dwidth = hcl.reduce_axis(0, pooling_w)
+    print(out_height,out_width)
+    return hcl.compute(
+        (batch, channel, out_height, out_width),
+        lambda i, c, h, w: tvm.select(max(data[i, c, h *
+                                    stride_h +
+                                    dheight, w *
+                                    stride_w +
+                                    dwidth], axis=[dheight, dwidth])>0,1,0),
+        name=name, dtype=data.dtype,
+        attrs=OrderedDict([
+            ('out_img_w', out_width),
+            ('out_img_h', out_height),
+            ('in_num', channel),
+            ('kernel_h', pooling[1]),
+            ('kernel_w', pooling[0]),
+            ('stride_h', stride[1]),
+            ('stride_w', stride[0]),
+            ('app_name', tvm.make.StringImm('max_pool'))]))
+
+def batch_norm(
+        data,
+        gamma,
+        beta,
+        moving_mean,
+        moving_var,
+        axis=1,
+        epsilon=10**-5,
+        center=1,
+        scale=1,
+        name="batch_norm"):
+    if axis < 0:
+        axis = len(data.shape) - 1
+    mred = []
+    vred = []
+    size = 1.0
+    for i in range(len(data.shape)):
+        if not i == axis:
+            mred.append(hcl.reduce_axis(0, data.shape[i], "mred" + str(i)))
+            vred.append(hcl.reduce_axis(0, data.shape[i], "vred" + str(i)))
+            size = size * data.shape[i]
+    new_shape = (data.shape[axis],)
+
+    def insert_axis(axis, red, *indices):
+        idx = []
+        cur_red = 0
+        for i in range(len(data.shape)):
+            if i == axis:
+                idx.append(indices[0])
+            else:
+                idx.append(red[cur_red])
+                cur_red = cur_red + 1
+        return tuple(idx)
+
+    def get_axis(axis, *indices):
+        indices = list(indices[0])
+        return (indices[axis],)
+
+    var_w = 1 #tvm.sqrt(2. / 9.) # No sure why var_w is needed
+    out = hcl.compute(data.shape, lambda *x: tvm.select(
+                    (data[x] * var_w - moving_mean[get_axis(axis, x)]) /
+                    (hcl.sqrt(moving_var[get_axis(axis, x)] + epsilon)) * gamma[get_axis(axis, x)]
+                    + beta[get_axis(axis, x)] > 0,
+                    1, # quantize
+                    0), name=name, dtype=data.dtype)
+    return out, moving_mean, moving_var
