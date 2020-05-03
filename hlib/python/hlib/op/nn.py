@@ -48,7 +48,7 @@ def pad(data, pad_before, pad_after=None, pad_value=0.0, name="pad"):
             return tvm.select(not_zero, data[tuple(index_tuple)], pad_value)
         return data[tuple(index_tuple)]
 
-    return hcl.compute(out_shape, _pad, name=name)
+    return hcl.compute(out_shape, _pad, name=name, dtype=data.dtype)
 
 
 def relay_pad(data, pad_width, pad_value=0.0,

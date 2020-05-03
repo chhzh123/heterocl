@@ -22,7 +22,8 @@ def flatten(data, name="flatten"):
         return index
 
     return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
-        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('flatten'))]))
+        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('flatten'))]),
+        dtype=data.dtype)
 
 def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
     assert len(
@@ -41,20 +42,22 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
         ('i', batch),
         ('app_name', tvm.make.StringImm('mm'))])
     matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
-        (data[i, k] == weight[j, k]) * 2 - 1, axis=k) * var_w, # xnor
-        name=name, attrs=attrs)
+        ((data[i, k] ^ weight[j, k]) << 1) - 1, axis=k), # xnor
+        name=name, attrs=attrs, dtype=data.dtype)
     if bias is not None:
         matmul = hcl.compute(
             (batch, out_dim),
-            lambda i, j: matmul[i, j] + bias[j],
+            lambda i, j: matmul[i, j]  * var_w + bias[j],
             name=name,
-            attrs=attrs)
+            attrs=attrs,
+            dtype=bias.dtype)
     if use_relu:
         matmul = hcl.compute(
             (batch, out_dim),
             lambda i, j: tvm.select(matmul[i, j] > 0, 1, 0),
             name=name,
-            attrs=attrs
+            attrs=attrs,
+            dtype=data.dtype
         )
     return matmul
 
@@ -117,8 +120,8 @@ def conv2d_nchw(
         lambda nn, ff, yy, xx: hcl.sum(
             tvm.select(if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right),
             ((1-(temp[nn, rc, yy * stride_h + ry * dilation_h,
-                 xx * stride_w + rx * dilation_w] !=
-            Filter[ff, rc, ry, rx])) * 2) - 1, # xnor
+                 xx * stride_w + rx * dilation_w] ^
+            Filter[ff, rc, ry, rx])) << 1) - 1, # xnor
             0), # neglect padding pixels in mac
             axis=[rc, ry, rx], dtype=out_dtype),
             name=name,
