@@ -41,13 +41,16 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
         ('j', out_dim),
         ('i', batch),
         ('app_name', tvm.make.StringImm('mm'))])
-    matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
-        ((1 - (data[i, k] ^ weight[j, k])) << 1) - 1, axis=k), # xnor
-        name=name, attrs=attrs, dtype=data.dtype)
-    if bias is not None:
-        matmul = hcl.compute(
-            (batch, out_dim),
-            lambda i, j: matmul[i, j]  * var_w + bias[j],
+    if bias is None:
+        matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
+            tvm.all(data[i, k] == weight[j, k]), axis=k)
+            * 2 - in_dim,
+            name=name,
+            attrs=attrs) # Data type needs to be specified!
+    else:
+        matmul = hcl.compute((batch, out_dim), lambda i, j: (sum(
+            tvm.all(data[i, k] == weight[j, k]), axis=k, dtype=bias.dtype)
+            * 2 - in_dim) * var_w + bias[j],
             name=name,
             attrs=attrs,
             dtype=bias.dtype)
@@ -55,7 +58,7 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
         matmul = hcl.compute(
             (batch, out_dim),
             lambda i, j: hcl.select(matmul[i, j] > 0, 1, 0),
-            name=name,
+            name="dense_relu",
             attrs=attrs,
             dtype=data.dtype
         )
@@ -108,7 +111,7 @@ def conv2d_nchw(
     # compute graph
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
-    temp = pad(Input, pad_before, pad_after, name="pad_temp")
+    temp = pad(Input, pad_before, pad_after)
     pad_in_height = in_height + pad_top + pad_down
     pad_in_width = in_width + pad_left + pad_right
     rc = hcl.reduce_axis(0, channel, name='rc')
@@ -118,11 +121,14 @@ def conv2d_nchw(
     out = hcl.compute(
         (batch, out_channel, out_height, out_width),
         lambda nn, ff, yy, xx: hcl.sum(
-            hcl.select(if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right),
-            ((1-(temp[nn, rc, yy * stride_h + ry * dilation_h,
-                 xx * stride_w + rx * dilation_w] ^
-            Filter[ff, rc, ry, rx])) << 1) - 1, # xnor
-            0), # neglect padding pixels in mac
+            hcl.select(
+                if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                tvm.all(temp[nn, rc,
+                            yy * stride_h + ry * dilation_h,
+                            xx * stride_w + rx * dilation_w] ==
+                         Filter[ff, rc, ry, rx])
+                * 2 - 1, # xnor
+                0),
             axis=[rc, ry, rx], dtype=out_dtype),
             name=name,
             dtype=out_dtype)
@@ -153,7 +159,8 @@ def max_pool2d_nchw(
         pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (pooling_h, pooling_w))
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_bottom, pad_right]
-    data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype))
+    if (pad_top,pad_left,pad_bottom,pad_right) != (0,0,0,0):
+        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype))
     out_height = simplify(
         (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
     out_width = simplify(
