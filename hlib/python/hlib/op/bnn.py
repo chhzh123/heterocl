@@ -6,6 +6,7 @@ from .op import *
 from .nn import pad, get_pad_tuple, simplify
 
 dtype = hcl.Float()
+qtype_bit = hcl.UInt(1)
 
 def if_mac(y, x, in_h, in_w, pad_top, pad_left, pad_down, pad_right):
     return tvm.all(x >= pad_left, x < in_w - pad_right, y >= pad_top, y < in_h - pad_down)
@@ -60,7 +61,7 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
             lambda i, j: hcl.select(matmul[i, j] > 0, 1, 0),
             name="dense_relu",
             attrs=attrs,
-            dtype=data.dtype
+            dtype=qtype_bit
         )
     return matmul
 
@@ -73,7 +74,7 @@ def conv2d_nchw(
         out_dtype=None,
         name='binary_conv2d'):
     if out_dtype is None or out_dtype == '':
-        out_dtype = Input.dtype
+        out_dtype = hcl.Int()
     assert isinstance(strides, int) or len(strides) == 2
     assert isinstance(dilation, int) or len(dilation) == 2
     if isinstance(strides, int):
@@ -173,8 +174,10 @@ def max_pool2d_nchw(
                                     stride_h +
                                     dheight, w *
                                     stride_w +
-                                    dwidth], axis=[dheight, dwidth])>0,1,0),
-        name=name, dtype=data.dtype,
+                                    dwidth], axis=[dheight, dwidth]) > 0,
+                                    1,
+                                    0),
+        name=name, dtype=qtype_bit,
         attrs=OrderedDict([
             ('out_img_w', out_width),
             ('out_img_h', out_height),
@@ -230,7 +233,7 @@ def batch_norm(
                     (hcl.sqrt(moving_var[get_axis(axis, x)] + epsilon)) * gamma[get_axis(axis, x)]
                     + beta[get_axis(axis, x)] > 0,
                     1, # quantize
-                    0), name=name, dtype=data.dtype)
+                    0), name=name, dtype=qtype_bit)
     return out, moving_mean, moving_var
 
 def batch_norm_threshold(
@@ -240,4 +243,4 @@ def batch_norm_threshold(
     return hcl.compute(data.shape, lambda i, c, h, w: hcl.select(
                     data[i, c, h, w] > threshold[c, h, w],
                     1, # quantize
-                    0), name=name, dtype=data.dtype)
+                    0), name=name, dtype=qtype_bit)
