@@ -24,7 +24,7 @@ requirements:
     - future
     - llvmdev ==6.0.0
     - libgcc ==5.2.0
-    - numpy ==1.16.1
+    - numpy ==1.17.0
     - decorator
     - networkx ==2.2
     - matplotlib ==2.2.3 
