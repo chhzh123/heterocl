@@ -599,7 +599,7 @@ def unpack(tensor, axis=0, factor=None, name=None, dtype=None):
 
     return compute(tuple(new_shape), assign_val, name, dtype)
 
-def pack(tensor, axis=0, factor=None, name=None, dtype=None):
+def pack(tensor, axis=0, factor=None, name=None, dtype=None, bitorder="little"):
     """Pack a tensor with smaller bitwidth to a tensor with larger bitwidth.
 
     This API packs the `axis`-th dimension of `tensor` to a new tensor
@@ -622,6 +622,9 @@ def pack(tensor, axis=0, factor=None, name=None, dtype=None):
 
     dtype : Type, optional
         The data type of the **packed tensor**
+
+    bitorder: str
+        Big-endian or little-endian. Default: little-endian
 
     Returns
     -------
@@ -662,7 +665,12 @@ def pack(tensor, axis=0, factor=None, name=None, dtype=None):
             new_indices = []
             for j in range(0, ndim):
                 if j == axis:
-                    new_indices.append(indices[j]*factor+i)
+                    if bitorder == "little":
+                        new_indices.append(indices[j]*factor+i)
+                    elif bitorder == "big":
+                        new_indices.append((indices[j]+1)*factor-i-1)
+                    else:
+                        raise APIError("Not supported bitorder")
                 else:
                     new_indices.append(indices[j])
             temp[0][bitwidth*(i+1) : bitwidth*i] = tensor[tuple(new_indices)]
