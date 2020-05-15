@@ -65,6 +65,43 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
         )
     return matmul
 
+def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_dense"):
+    assert len(
+        data.shape) == 2 and len(
+        weight.shape) == 2, "only support 2-dim dense"
+    if bias is not None:
+        assert len(bias.shape) == 1
+    batch, in_dim = data.shape # in_dim has been packed
+    out_dim, _ = weight.shape # only packed axis 1
+    k = hcl.reduce_axis(0, in_dim)
+    var_w = np.sqrt(2. / in_dim) # predefined constant
+    # var_w = 1
+    attrs = OrderedDict([
+        ('k', in_dim),
+        ('j', out_dim),
+        ('i', batch),
+        ('app_name', tvm.make.StringImm('mm'))])
+    matmul = hcl.compute((batch, out_dim), lambda i, j: 
+            (in_dim * 32-sum(tvm.intrin.popcount(data[i, k] ^ weight[j, k]),axis=k))
+            * 2 - in_dim * 32,
+            name="matmul",
+            attrs=attrs,
+            dtype=hcl.Int(34)) # Data type needs to be specified!
+    matmul = hcl.compute((batch, out_dim), lambda i, j: 
+            matmul[i, j] * var_w + bias[j],
+            name=name,
+            attrs=attrs,
+            dtype=bias.dtype)
+    if use_relu:
+        matmul = hcl.compute(
+            (batch, out_dim),
+            lambda i, j: hcl.select(matmul[i, j] > 0, 1, 0),
+            name="dense_relu",
+            attrs=attrs,
+            dtype=qtype_bit
+        )
+    return matmul
+
 def conv2d_nchw(
         Input,
         Filter,
