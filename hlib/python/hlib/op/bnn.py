@@ -7,6 +7,7 @@ from .nn import pad, get_pad_tuple, simplify
 
 dtype = hcl.Float()
 qtype_bit = hcl.UInt(1)
+or_all = hcl.reducer(False, lambda x, y: x | y, hcl.UInt(8))
 
 def if_mac(y, x, in_h, in_w, pad_top, pad_left, pad_down, pad_right):
     return tvm.all(x >= pad_left, x < in_w - pad_right, y >= pad_top, y < in_h - pad_down)
@@ -231,6 +232,59 @@ def max_pool2d_nchw(
                                     dwidth], axis=[dheight, dwidth]) > 0,
                                     1,
                                     0),
+        name=name, dtype=qtype_bit,
+        attrs=OrderedDict([
+            ('out_img_w', out_width),
+            ('out_img_h', out_height),
+            ('in_num', channel),
+            ('kernel_h', pooling[1]),
+            ('kernel_w', pooling[0]),
+            ('stride_h', stride[1]),
+            ('stride_w', stride[0]),
+            ('app_name', tvm.make.StringImm('max_pool'))]))
+
+def packed_max_pool2d_nchw(
+        data,
+        pooling=[1, 1],
+        stride=[1, 1],
+        padding=[0, 0],
+        layout='NCHW',
+        name='packed_binary_max_pool2d'):
+    assert len(data.shape) == 4, "only support 4-dim pooling"
+    assert len(stride) == 2, "only support 2-dim stride"
+    assert pooling == [2,2], "only support [2,2] padding now"
+    max = hcl.reducer(
+        hcl.min_value(data.dtype),
+        lambda x, y: tvm.make.Max(x, y),
+        data.dtype)
+    pooling_h, pooling_w = pooling
+    stride_h, stride_w = stride
+    batch, channel, height, width = data.shape
+    bitwidth = int(data.dtype.split("int")[-1])
+    width *= bitwidth
+    if len(padding) == 4:
+        pad_top, pad_left, pad_bottom, pad_right = padding
+    else:
+        pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (pooling_h, pooling_w))
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_bottom, pad_right]
+    if (pad_top,pad_left,pad_bottom,pad_right) != (0,0,0,0):
+        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype))
+    out_height = simplify(
+        (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
+    out_width = simplify(
+        (width - pooling_w + pad_left + pad_right) // stride_w + 1)
+    dheight = hcl.reduce_axis(0, pooling_h)
+    dwidth = hcl.reduce_axis(0, pooling_w)
+    return hcl.compute(
+        (batch, channel, out_height, out_width),
+        lambda i, c, h, w:
+            # or_all(data[i, c, h * stride_h + dheight,
+            #                   w * stride_w + dwidth], axis=[dheight, dwidth]),
+            data[i, c, h * stride_h, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth] |
+            data[i, c, h * stride_h, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth+1] |
+            data[i, c, h * stride_h+1, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth] |
+            data[i, c, h * stride_h+1, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth+1],
         name=name, dtype=qtype_bit,
         attrs=OrderedDict([
             ('out_img_w', out_width),
