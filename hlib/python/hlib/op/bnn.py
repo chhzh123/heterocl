@@ -260,8 +260,6 @@ def packed_max_pool2d_nchw(
     pooling_h, pooling_w = pooling
     stride_h, stride_w = stride
     batch, channel, height, width = data.shape
-    bitwidth = int(data.dtype.split("int")[-1])
-    width *= bitwidth
     if len(padding) == 4:
         pad_top, pad_left, pad_bottom, pad_right = padding
     else:
@@ -277,14 +275,14 @@ def packed_max_pool2d_nchw(
     dheight = hcl.reduce_axis(0, pooling_h)
     dwidth = hcl.reduce_axis(0, pooling_w)
     return hcl.compute(
-        (batch, channel, out_height, out_width),
+        (batch, channel*32, out_height, out_width),
         lambda i, c, h, w:
             # or_all(data[i, c, h * stride_h + dheight,
             #                   w * stride_w + dwidth], axis=[dheight, dwidth]),
-            data[i, c, h * stride_h, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth] |
-            data[i, c, h * stride_h, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth+1] |
-            data[i, c, h * stride_h+1, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth] |
-            data[i, c, h * stride_h+1, (w * stride_w) // bitwidth][(w * stride_w) % bitwidth+1],
+            data[i, c//32, h * stride_h, w * stride_w][c%32] |
+            data[i, c//32, h * stride_h, w * stride_w+1][c%32] |
+            data[i, c//32, h * stride_h+1, w * stride_w][c%32] |
+            data[i, c//32, h * stride_h+1, w * stride_w+1][c%32],
         name=name, dtype=qtype_bit,
         attrs=OrderedDict([
             ('out_img_w', out_width),
