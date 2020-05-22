@@ -47,27 +47,27 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
         matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
             tvm.all(data[i, k] == weight[j, k]), axis=k)
             * 2 - in_dim,
-            name=name,
+            name=name+"_matmul",
             attrs=attrs) # Data type needs to be specified!
     else:
-        matmul = hcl.compute((batch, out_dim), lambda i, j: (sum(
-            tvm.all(data[i, k] == weight[j, k]), axis=k, dtype=bias.dtype)
+        matmul = hcl.compute((batch, out_dim), lambda i, j: (hcl.sum(
+            tvm.all(data[i, k] == weight[j, k]), axis=k, dtype=bias.dtype, name=name+"_sum")
             * 2 - in_dim) * var_w + bias[j],
-            name=name,
+            name=(name+"_matmul" if use_relu else name),
             attrs=attrs,
             dtype=bias.dtype)
     if use_relu:
         matmul = hcl.compute(
             (batch, out_dim),
             lambda i, j: hcl.select(matmul[i, j] > 0, 1, 0),
-            name="dense_relu",
+            name=name,
             attrs=attrs,
             dtype=qtype_bit
         )
     return matmul
 
-def _popcount(num):
-    out = hcl.scalar(0, "popcount_ini")
+def _popcount(num,name="popcnt"):
+    out = hcl.scalar(0, name=name)
     with hcl.for_(0, 32) as i:
         # Bit selection operation
         out.v += num[i]
@@ -93,28 +93,28 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
         ('app_name', tvm.make.StringImm('mm'))])
     xor = hcl.compute((batch, out_dim, in_dim), lambda i, j, u:
             data[i, u] ^ weight[j, u],
-            name="xor",
+            name=name+"_xor",
             attrs=attrs)
     popcnt = hcl.compute(xor.shape, lambda i, j, u:
-            _popcount(xor[i, j, u]),
-            name="popcount",
+            _popcount(xor[i, j, u],name=name+"_popcnt"),
+            name=name+"_popcount",
             dtype=data.dtype)
     matmul = hcl.compute((batch, out_dim), lambda i, j:
             in_dim * bitwidth - 2 * sum(popcnt[i, j, k], axis=k),
-            name="matmul",
+            name=name+"_matmul",
             attrs=attrs,
             dtype=data.dtype) # Data type needs to be specified!
     if bias is not None:
         matmul = hcl.compute((batch, out_dim), lambda i, j:
                 matmul[i, j] * var_w + bias[j],
-                name=name,
+                name=(name+"_bias" if use_relu else name),
                 attrs=attrs,
                 dtype=bias.dtype)
     if use_relu:
         matmul = hcl.compute(
             (batch, out_dim),
             lambda i, j: hcl.select(matmul[i, j] > 0, 1, 0),
-            name="dense_relu",
+            name=name,
             attrs=attrs,
             dtype=qtype_bit
         )
@@ -167,7 +167,7 @@ def conv2d_nchw(
     # compute graph
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
-    temp = pad(Input, pad_before, pad_after)
+    temp = pad(Input, pad_before, pad_after, name=name+"_pad")
     pad_in_height = in_height + pad_top + pad_down
     pad_in_width = in_width + pad_left + pad_right
     rc = hcl.reduce_axis(0, channel, name='rc')
@@ -185,7 +185,7 @@ def conv2d_nchw(
                          Filter[ff, rc, ry, rx])
                 * 2 - 1, # xnor
                 0),
-            axis=[rc, ry, rx], dtype=out_dtype),
+            axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
             name=name,
             dtype=out_dtype)
     return out
@@ -216,7 +216,7 @@ def max_pool2d_nchw(
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_bottom, pad_right]
     if (pad_top,pad_left,pad_bottom,pad_right) != (0,0,0,0):
-        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype))
+        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype),name=name+"_pad")
     out_height = simplify(
         (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
     out_width = simplify(
@@ -267,7 +267,7 @@ def packed_max_pool2d_nchw(
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_bottom, pad_right]
     if (pad_top,pad_left,pad_bottom,pad_right) != (0,0,0,0):
-        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype))
+        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype),name=name+"_pad")
     out_height = simplify(
         (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
     out_width = simplify(
