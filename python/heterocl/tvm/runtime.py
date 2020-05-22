@@ -40,7 +40,6 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
             replace_text("project/host.cpp", "#include \"kernel.h\"", "")
 
         cmd = "cd project; make "
-        print(mode)
         if mode == "csim":
             cmd += "csim"
             out = run_process(cmd + " 2>&1")
@@ -49,7 +48,7 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
                 time.strftime("%H:%M:%S", time.gmtime()), runtime))
 
         elif "csyn" in mode:
-            cmd += "csyn"
+            cmd += "vivado_hls"
             print("[{}] Begin synthesizing project ...".format(
                 time.strftime("%H:%M:%S", time.gmtime())))
             subprocess.Popen(cmd, shell=True).wait()
@@ -111,7 +110,7 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
     return str(qor)
 
 @register_func
-def copy_and_compile(platform, mode, backend, host_only, cfg):
+def copy_and_compile(platform, mode, backend, host_only, cfg, tcl):
     """  create necessary files and compile into binary """
     path = api.__file__
     path = os.path.join(path[0:path.find("python")], "tvm/src/template/")
@@ -148,16 +147,22 @@ def copy_and_compile(platform, mode, backend, host_only, cfg):
         selected_mode = mode.split("|")
         for s_mode in selected_mode:
             removed_mode.remove(s_mode)
-        new_tcl = ""
-        with open("project/run.tcl","r") as tcl_file:
-            for line in tcl_file:
-                if ("csim_design" in line and "csim" in removed_mode) \
-                  or ("csynth_design" in line and "csyn" in removed_mode) \
-                  or ("cosim_design" in line and "cosim" in removed_mode) \
-                  or ("export_design" in line and "impl" in removed_mode):
-                    new_tcl += "#" + line
-                else:
-                    new_tcl += line
+
+        if tcl == "":
+            new_tcl = ""
+            with open("project/run.tcl","r") as tcl_file:
+                for line in tcl_file:
+                    if ("csim_design" in line and "csim" in removed_mode) \
+                    or ("csynth_design" in line and "csyn" in removed_mode) \
+                    or ("cosim_design" in line and "cosim" in removed_mode) \
+                    or ("export_design" in line and "impl" in removed_mode):
+                        new_tcl += "#" + line
+                    else:
+                        new_tcl += line
+        else: # customized tcl
+            print("Warning: Customized Tcl file is used, and target mode becomes invalid.")
+            new_tcl = tcl
+
         with open("project/run.tcl","w") as tcl_file:
             tcl_file.write(new_tcl)
         return "success"
