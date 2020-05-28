@@ -110,13 +110,15 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
                 name=(name+"_bias" if use_relu else name),
                 attrs=attrs,
                 dtype=bias.dtype)
+    rk = hcl.reduce_axis(0, bitwidth, name='rk')
+    genpack = hcl.reducer(0, lambda x, y: (y << 1) + x, dtype=data.dtype) # y is accumulator
     if use_relu:
         matmul = hcl.compute(
-            (batch, out_dim),
-            lambda i, j: hcl.select(matmul[i, j] > 0, 1, 0),
+            (batch, out_dim // bitwidth),
+            lambda i, j: genpack(hcl.select(matmul[i, (j+1)*bitwidth-rk-1] > 0, 1, 0),axis=rk),
             name=name,
             attrs=attrs,
-            dtype=qtype_bit
+            dtype=data.dtype
         )
     return matmul
 
