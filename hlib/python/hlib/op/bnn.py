@@ -7,7 +7,6 @@ from .nn import pad, get_pad_tuple, simplify
 
 dtype = hcl.Float()
 qtype_bit = hcl.UInt(1)
-or_all = hcl.reducer(False, lambda x, y: x | y, hcl.UInt(8))
 
 def if_mac(y, x, in_h, in_w, pad_top, pad_left, pad_down, pad_right):
     return tvm.all(x >= pad_left, x < in_w - pad_right, y >= pad_top, y < in_h - pad_down)
@@ -265,6 +264,7 @@ def packed_max_pool2d_nchw(
     pooling_h, pooling_w = pooling
     stride_h, stride_w = stride
     batch, channel, height, width = data.shape
+    bitwidth = int(data.dtype.split("int")[-1])
     if len(padding) == 4:
         pad_top, pad_left, pad_bottom, pad_right = padding
     else:
@@ -279,16 +279,14 @@ def packed_max_pool2d_nchw(
         (width - pooling_w + pad_left + pad_right) // stride_w + 1)
     dheight = hcl.reduce_axis(0, pooling_h)
     dwidth = hcl.reduce_axis(0, pooling_w)
-    return hcl.compute(
-        (batch, channel*32, out_height, out_width),
+    maxpool = hcl.compute(
+        (batch, channel, out_height, out_width),
         lambda i, c, h, w:
-            # or_all(data[i, c, h * stride_h + dheight,
-            #                   w * stride_w + dwidth], axis=[dheight, dwidth]),
-            data[i, c//32, h * stride_h, w * stride_w][c%32] |
-            data[i, c//32, h * stride_h, w * stride_w+1][c%32] |
-            data[i, c//32, h * stride_h+1, w * stride_w][c%32] |
-            data[i, c//32, h * stride_h+1, w * stride_w+1][c%32],
-        name=name, dtype=qtype_bit,
+            data[i, c, h * stride_h, w * stride_w] |
+            data[i, c, h * stride_h, w * stride_w+1] |
+            data[i, c, h * stride_h+1, w * stride_w] |
+            data[i, c, h * stride_h+1, w * stride_w+1],
+        name=name, dtype=hcl.UInt(bitwidth),
         attrs=OrderedDict([
             ('out_img_w', out_width),
             ('out_img_h', out_height),
@@ -298,6 +296,12 @@ def packed_max_pool2d_nchw(
             ('stride_h', stride[1]),
             ('stride_w', stride[0]),
             ('app_name', tvm.make.StringImm('max_pool'))]))
+    # return maxpool
+    return hcl.compute((batch, channel * bitwidth, out_height, out_width),
+        lambda i, c, h, w:
+            maxpool[i, c // bitwidth, h, w][c % bitwidth],
+        name=name+"_unpack",
+        dtype=qtype_bit)
 
 def batch_norm(
         data,
