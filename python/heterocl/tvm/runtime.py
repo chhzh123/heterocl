@@ -2,6 +2,7 @@ from . import api
 from ._ffi.function import register_func
 import os, subprocess, time, re
 from ..report import parse_xml
+from .hardcode import add_loop_label
 
 def replace_text(f_name, prev, new):
     with open(f_name, 'r') as fp:
@@ -38,6 +39,8 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
         if not os.path.isfile("project/kernel.cpp"):
             replace_text("project/Makefile", "kernel.cpp", "")
             replace_text("project/host.cpp", "#include \"kernel.h\"", "")
+
+        add_loop_label("project/kernel.cpp")
 
         cmd = "cd project; make "
         if mode == "csim":
