@@ -65,9 +65,9 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
         )
     return matmul
 
-def _popcount(num,name="popcnt"):
+def _popcount(num,bitwidth,name="popcnt"):
     out = hcl.scalar(0, name=name)
-    with hcl.for_(0, 32) as i:
+    with hcl.for_(0, bitwidth) as i:
         # Bit selection operation
         out.v += num[i]
     return out.v
@@ -95,7 +95,7 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
             name=name+"_xor",
             attrs=attrs)
     popcnt = hcl.compute(xor.shape, lambda i, j, u:
-            _popcount(xor[i, j, u],name=name+"_popcnt"),
+            _popcount(xor[i, j, u],32,name=name+"_popcnt"),
             name=name+"_popcount",
             dtype=data.dtype)
     matmul = hcl.compute((batch, out_dim), lambda i, j:
@@ -183,10 +183,98 @@ def conv2d_nchw(
         lambda nn, ff, yy, xx: hcl.sum(
             hcl.select(
                 if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                tvm.all(temp[nn, rc,
-                            yy * stride_h + ry * dilation_h,
-                            xx * stride_w + rx * dilation_w] ==
+                ((1 - temp[nn, rc, yy * stride_h + ry * dilation_h,
+                            xx * stride_w + rx * dilation_w] ^
                          Filter[ff, rc, ry, rx])
+                << 1) - 1, # xnor
+                0),
+            axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
+            name=name,
+            dtype=out_dtype)
+    return out
+
+def packed_conv2d_nchw(
+        Input,
+        Filter,
+        strides=[1, 1],
+        padding=[0, 0],
+        dilation=[1, 1],
+        out_dtype=None,
+        name='packed_binary_conv2d'):
+    if out_dtype is None or out_dtype == '':
+        out_dtype = hcl.Int()
+    assert isinstance(strides, int) or len(strides) == 2
+    assert isinstance(dilation, int) or len(dilation) == 2
+    if isinstance(strides, int):
+        stride_h = stride_w = strides
+    else:
+        stride_h, stride_w = strides
+
+    if isinstance(dilation, int):
+        dilation_h = dilation_w = dilation
+    else:
+        dilation_h, dilation_w = dilation
+
+    bitwidth = int(Input.dtype.split("int")[-1])
+    print("bitwidth: {}".format(bitwidth))
+    batch, in_channel, in_height, in_width = Input.shape
+    num_filter, channel, kernel_h, kernel_w = Filter.shape
+    # compute the output shape
+    dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+    dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (dilated_kernel_h, dilated_kernel_w))
+    out_channel = num_filter
+    out_height = simplify(
+        (in_height - dilated_kernel_h + pad_top + pad_down) //
+        stride_h + 1)
+    out_width = simplify(
+        (in_width - dilated_kernel_w + pad_left + pad_right) //
+        stride_w + 1)
+    # compute graph
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_down, pad_right]
+    temp = pad(Input, pad_before, pad_after, name=name+"_pad")
+    pad_in_height = in_height + pad_top + pad_down
+    pad_in_width = in_width + pad_left + pad_right
+    rc = hcl.reduce_axis(0, channel, name='rc')
+    ry = hcl.reduce_axis(0, kernel_h, name='ry')
+    rx = hcl.reduce_axis(0, kernel_w, name='rx')
+    assert stride_h == 1 and stride_w == 1
+    assert dilation_h == 1 and dilation_w == 1
+    kernel_size = kernel_h * kernel_w
+    if bitwidth == 1:
+        # const = hcl.scalar(1, name=name+"_const", dtype=hcl.UInt(bitwidth))
+        const = 1
+    elif bitwidth == 16:
+        # const = hcl.scalar(0xffff, name=name+"_const", dtype=hcl.UInt(bitwidth))
+        const = 0xffff
+    elif bitwidth == 32:
+        # const = hcl.scalar(0xffffffff, name=name+"_const", dtype=hcl.UInt(bitwidth))
+        const = 0xffffffff
+    print("const:",const)
+    print(channel, in_channel,(batch, out_channel,out_height,out_width))
+    def cal_popcount(x,bitwidth):
+        return hcl.compute((1,),lambda i: _popcount(x,bitwidth),dtype=hcl.UInt(bitwidth))
+    def extract_window(feature,nn,yy,xx):
+        return hcl.compute((in_channel,kernel_h,kernel_w),
+                        lambda cc, ky, kx: feature[nn, cc, yy+ky, xx+kx],
+                        dtype=feature.dtype)
+    def extract_filter(conv_filter,out_c):
+        return hcl.compute((in_channel,kernel_h,kernel_w),
+                        lambda cc, ky, kx: conv_filter[out_c, cc, ky, kx],
+                        dtype=conv_filter.dtype)
+    def bitwise_xor(feature,conv_filter):
+        print((in_channel,kernel_h,kernel_w))
+        return hcl.compute((in_channel,kernel_h,kernel_w),
+                        lambda cc, ky, kx: feature[cc, ky, kx] ^ conv_filter[cc, ky, kx],
+                        dtype=feature.dtype)
+    out = hcl.compute(
+        (batch, out_channel, out_height, out_width),
+        lambda nn, ff, yy, xx: hcl.sum(
+            hcl.select(
+                if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                (const - bitwise_xor(extract_window(temp,nn,yy,xx),extract_filter(Filter,ff))[rc, ry, rx])
                 * 2 - 1, # xnor
                 0),
             axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
