@@ -254,8 +254,6 @@ def packed_conv2d_nchw(
         const = 0xffffffff
     print("const:",const)
     print(channel, in_channel,(batch, out_channel,out_height,out_width))
-    def cal_popcount(x,bitwidth):
-        return hcl.compute((1,),lambda i: _popcount(x,bitwidth),dtype=hcl.UInt(bitwidth))
     def extract_window(feature,nn,yy,xx):
         return hcl.compute((in_channel,kernel_h,kernel_w),
                         lambda cc, ky, kx: feature[nn, cc, yy+ky, xx+kx],
@@ -264,18 +262,21 @@ def packed_conv2d_nchw(
         return hcl.compute((in_channel,kernel_h,kernel_w),
                         lambda cc, ky, kx: conv_filter[out_c, cc, ky, kx],
                         dtype=conv_filter.dtype)
-    def bitwise_xor(feature,conv_filter):
+    def bitwise_xnor(feature,conv_filter):
         print((in_channel,kernel_h,kernel_w))
         return hcl.compute((in_channel,kernel_h,kernel_w),
-                        lambda cc, ky, kx: feature[cc, ky, kx] ^ conv_filter[cc, ky, kx],
+                        lambda cc, ky, kx: const - (feature[cc, ky, kx] ^ conv_filter[cc, ky, kx]),
                         dtype=feature.dtype)
+    def cal_popcount(x,bitwidth):
+        return hcl.compute(((in_channel,kernel_h,kernel_w)),
+                        lambda cc, ky, kx: _popcount(x[cc, ky, kx],bitwidth),
+                        dtype=hcl.UInt(bitwidth))
     out = hcl.compute(
         (batch, out_channel, out_height, out_width),
         lambda nn, ff, yy, xx: hcl.sum(
             hcl.select(
                 if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                (const - bitwise_xor(extract_window(temp,nn,yy,xx),extract_filter(Filter,ff))[rc, ry, rx])
-                * 2 - 1, # xnor
+                cal_popcount(bitwise_xnor(extract_window(temp,nn,yy,xx),extract_filter(Filter,ff)),bitwidth)[rc, ry, rx] * 2 - bitwidth, # xnor
                 0),
             axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
             name=name,
