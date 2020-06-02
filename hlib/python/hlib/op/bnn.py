@@ -218,7 +218,7 @@ def packed_conv2d_nchw(
     bitwidth = int(Input.dtype.split("int")[-1])
     print("bitwidth: {}".format(bitwidth))
     batch, in_channel, in_height, in_width = Input.shape
-    num_filter, channel, kernel_h, kernel_w = Filter.shape
+    num_filter, _, kernel_h, kernel_w = Filter.shape
     # compute the output shape
     dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
     dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
@@ -237,7 +237,7 @@ def packed_conv2d_nchw(
     temp = pad(Input, pad_before, pad_after, name=name+"_pad")
     pad_in_height = in_height + pad_top + pad_down
     pad_in_width = in_width + pad_left + pad_right
-    rc = hcl.reduce_axis(0, channel, name='rc')
+    rc = hcl.reduce_axis(0, in_channel, name='rc')
     ry = hcl.reduce_axis(0, kernel_h, name='ry')
     rx = hcl.reduce_axis(0, kernel_w, name='rx')
     assert stride_h == 1 and stride_w == 1
@@ -253,7 +253,8 @@ def packed_conv2d_nchw(
         # const = hcl.scalar(0xffffffff, name=name+"_const", dtype=hcl.UInt(bitwidth))
         const = 0xffffffff
     print("const:",const)
-    print(channel, in_channel,(batch, out_channel,out_height,out_width))
+    print(temp.dtype,Filter.dtype)
+    print(temp.shape,Filter.shape,(batch, out_channel, out_height, out_width))
     def extract_window(feature,nn,yy,xx):
         return hcl.compute((in_channel,kernel_h,kernel_w),
                         lambda cc, ky, kx: feature[nn, cc, yy+ky, xx+kx],
@@ -263,7 +264,6 @@ def packed_conv2d_nchw(
                         lambda cc, ky, kx: conv_filter[out_c, cc, ky, kx],
                         dtype=conv_filter.dtype)
     def bitwise_xnor(feature,conv_filter):
-        print((in_channel,kernel_h,kernel_w))
         return hcl.compute((in_channel,kernel_h,kernel_w),
                         lambda cc, ky, kx: const - (feature[cc, ky, kx] ^ conv_filter[cc, ky, kx]),
                         dtype=feature.dtype)
@@ -276,7 +276,8 @@ def packed_conv2d_nchw(
         lambda nn, ff, yy, xx: hcl.sum(
             hcl.select(
                 if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                cal_popcount(bitwise_xnor(extract_window(temp,nn,yy,xx),extract_filter(Filter,ff)),bitwidth)[rc, ry, rx] * 2 - bitwidth, # xnor
+                # extract_window(temp,nn,yy,xx)[rc, ry, rx] + extract_filter(Filter,ff)[rc, ry, rx],
+                cal_popcount(bitwise_xnor(extract_window(temp,nn,yy,xx),extract_filter(Filter,ff)),bitwidth)[rc, ry, rx] * 2 - bitwidth,
                 0),
             axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
             name=name,
