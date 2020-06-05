@@ -99,59 +99,6 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
     bitwidth = int(data.dtype.split("int")[-1])
     batch, in_dim = data.shape # in_dim has been packed
     out_dim, _ = weight.shape # only packed axis 1
-    k = hcl.reduce_axis(0, in_dim)
-    var_w = np.sqrt(2. / in_dim) # predefined constant
-    # var_w = 1
-    attrs = OrderedDict([
-        ('k', in_dim),
-        ('j', out_dim),
-        ('i', batch),
-        ('app_name', tvm.make.StringImm('mm'))])
-    xor = hcl.compute((batch, out_dim, in_dim), lambda i, j, u:
-            data[i, u] ^ weight[j, u],
-            name=name+"_xor",
-            attrs=attrs)
-    rb = hcl.reduce_axis(0,bitwidth,name=name+"_rb")
-    popcnt = hcl.compute(xor.shape, lambda i, j, u:
-            hcl.sum(xor[i, j, u][rb],axis=rb,name=name+"_popcnt"),
-            name=name+"_popcount",
-            dtype=data.dtype)
-    matmul = hcl.compute((batch, out_dim), lambda i, j:
-            in_dim * bitwidth - 2 * sum(popcnt[i, j, k], axis=k),
-            name=name+"_matmul",
-            attrs=attrs,
-            dtype=data.dtype) # Data type needs to be specified!
-    if bias is not None:
-        matmul = hcl.compute((batch, out_dim), lambda i, j:
-                matmul[i, j] * var_w + bias[j],
-                name=(name+"_bias" if use_relu else name),
-                attrs=attrs,
-                dtype=bias.dtype)
-    def genpack(i, j):
-        out = hcl.scalar(0, name=name+"_pack", dtype=data.dtype)
-        with hcl.for_(0, bitwidth) as k:
-            out[0][(k+1) : k] = hcl.select(matmul[i, j*bitwidth+k] > 0, 1, 0)
-        return out[0]
-    if use_relu:
-        matmul = hcl.compute(
-            (batch, out_dim // bitwidth),
-            genpack,
-            name=name,
-            attrs=attrs,
-            dtype=data.dtype
-        )
-    return matmul
-
-def packed_dense2(data, weight, bias=None, use_relu=False, name="packed_binary_dense"):
-    assert len(
-        data.shape) == 2 and len(
-        weight.shape) == 2, "only support 2-dim dense"
-    if bias is not None:
-        assert len(bias.shape) == 1
-    assert "int" in data.dtype, "data type should be int or unsigned int"
-    bitwidth = int(data.dtype.split("int")[-1])
-    batch, in_dim = data.shape # in_dim has been packed
-    out_dim, _ = weight.shape # only packed axis 1
     rk = hcl.reduce_axis(0, in_dim, name=name+"_rk")
     var_w = np.sqrt(2. / in_dim) # predefined constant
     # var_w = 1
