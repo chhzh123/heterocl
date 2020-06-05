@@ -26,6 +26,23 @@ def flatten(data, name="flatten"):
         name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('flatten'))]),
         dtype=data.dtype)
 
+def packed_flatten(data, name="packed_flatten"):
+    ishape = data.shape
+    dim = 1
+    for i in range(1, len(ishape)):
+        dim = dim * ishape[i]
+    oshape = (ishape[0], dim)
+
+    def unwrap(idx, shape):
+        index = []
+        for s in reversed(shape):
+            index.append(idx % s)
+            idx = idx / s
+        return list(reversed(index))
+
+    return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
+        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('packed_flatten'))]))
+
 def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
     assert len(
         data.shape) == 2 and len(
@@ -392,7 +409,8 @@ def packed_max_pool2d_nchw(
         stride=[1, 1],
         padding=[0, 0],
         layout='NCHW',
-        name='packed_binary_max_pool2d'):
+        name='packed_binary_max_pool2d',
+        unpack=True):
     assert len(data.shape) == 4, "only support 4-dim pooling"
     assert len(stride) == 2, "only support 2-dim stride"
     assert pooling == [2,2], "only support [2,2] padding now"
@@ -435,12 +453,14 @@ def packed_max_pool2d_nchw(
             ('stride_h', stride[1]),
             ('stride_w', stride[0]),
             ('app_name', tvm.make.StringImm('max_pool'))]))
-    # return maxpool
-    return hcl.compute((batch, channel * bitwidth, out_height, out_width),
-        lambda i, c, h, w:
-            maxpool[i, c // bitwidth, h, w][c % bitwidth],
-        name=name+"_unpack",
-        dtype=qtype_bit)
+    if not unpack:
+        return maxpool
+    else:
+        return hcl.compute((batch, channel * bitwidth, out_height, out_width),
+            lambda i, c, h, w:
+                maxpool[i, c // bitwidth, h, w][c % bitwidth],
+            name=name+"_unpack",
+            dtype=qtype_bit)
 
 def batch_norm(
         data,
