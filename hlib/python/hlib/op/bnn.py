@@ -147,12 +147,13 @@ def packed_dense2(data, weight, bias=None, use_relu=False, name="packed_binary_d
             data[i, u] ^ weight[j, u],
             name=name+"_xor",
             attrs=attrs)
-    rb = hcl.reduce_axis(0, 32, name=name+"_rb")
+    rb = hcl.reduce_axis(0, bitwidth, name=name+"_rb")
     if bias is not None:
         matmul = hcl.compute((batch, out_dim), lambda i, j:
-                in_dim * bitwidth - 2 * sum(
-                hcl.sum(xor[i, j, rk][rb], axis=rb, dtype=hcl.UInt(32), name=name+"_nxor"), # popcount
-                axis=rk,name=name+"_matmal",dtype=data.dtype),
+                (in_dim * bitwidth - 2 * sum(
+                xor[i, j, rk][rb], # popcount
+                axis=[rk, rb],name=name+"_matmal",dtype=data.dtype))
+                * var_w + bias[j],
                 name=(name+"_bias" if use_relu else name),
                 attrs=attrs,
                 dtype=bias.dtype)
@@ -325,7 +326,6 @@ def packed_conv2d_nchw(
         lambda nn, ff, yy, xx: hcl.sum(
             hcl.select(
                 if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                # extract_window(temp,nn,yy,xx)[rc, ry, rx] + extract_filter(Filter,ff)[rc, ry, rx],
                 cal_popcount(bitwise_xnor(extract_window(temp,nn,yy,xx),extract_filter(Filter,ff)),bitwidth)[rc, ry, rx] * 2 - bitwidth,
                 0),
             axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
