@@ -82,12 +82,21 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
         )
     return matmul
 
-def _popcount(num,bitwidth,name="popcnt"):
-    out = hcl.scalar(0, name=name)
-    with hcl.for_(0, bitwidth) as i:
-        # Bit selection operation
-        out.v += num[i]
-    return out.v
+# def _popcount(num,bitwidth,name="popcnt"):
+#     out = hcl.scalar(0, name=name)
+#     with hcl.for_(0, bitwidth) as i:
+#         # Bit selection operation
+#         out.v += num[i]
+#     return out.v
+
+def mypopcount(_x,bitwidth):
+    x = hcl.scalar(0, name="popcnt")
+    x.v = _x - ((_x >> 1) & 0x55555555)
+    x.v = (x.v & 0x33333333) + ((x.v >> 2) & 0x33333333)
+    x.v = (x.v + (x.v >> 4)) & 0x0F0F0F0F
+    x.v = x.v + (x.v >> 8)
+    x.v = x.v + (x.v >> 16)
+    return x & 0x0000003F
 
 def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_dense"):
     assert len(
@@ -250,10 +259,10 @@ def packed_conv2d_nchw(
     temp = pad(Input, pad_before, pad_after, name=name+"_pad")
     pad_in_height = in_height + pad_top + pad_down
     pad_in_width = in_width + pad_left + pad_right
-    rc = hcl.reduce_axis(0, in_channel, name=name+'rc')
-    ry = hcl.reduce_axis(0, kernel_h, name=name+'ry')
-    rx = hcl.reduce_axis(0, kernel_w, name=name+'rx')
-    rb = hcl.reduce_axis(0, bitwidth, name=name+'rb')
+    rc = hcl.reduce_axis(0, in_channel, name=name+'_rc')
+    ry = hcl.reduce_axis(0, kernel_h, name=name+'_ry')
+    rx = hcl.reduce_axis(0, kernel_w, name=name+'_rx')
+    rb = hcl.reduce_axis(0, bitwidth, name=name+'_rb')
     assert stride_h == 1 and stride_w == 1
     assert dilation_h == 1 and dilation_w == 1
     kernel_size = kernel_h * kernel_w
@@ -275,7 +284,8 @@ def packed_conv2d_nchw(
         lambda nn, ff, yy, xx: hcl.sum(
             hcl.select(
                 if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                (_popcount(const - temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx],bitwidth) << 1) - window_size,
+                (mypopcount(const - temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx],bitwidth) << 1) - window_size,
+                # ((1 - temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]) << 1) - 1,
                 0),
             axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
             name=name,
@@ -362,6 +372,7 @@ def packed_conv2d_nchw2(
                         lambda cc, ky, kx: #_popcount(x[cc, ky, kx],bitwidth),
                         hcl.sum(x[cc, ky, kx][rb], axis=[rb], dtype=hcl.UInt(bitwidth)),
                         dtype=hcl.UInt(bitwidth),name=name+"_popcnt")
+    window_size = bitwidth * kernel_size
     out = hcl.compute(
         (batch, out_channel, out_height, out_width),
         lambda nn, ff, yy, xx: hcl.sum(
