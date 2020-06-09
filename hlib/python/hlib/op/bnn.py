@@ -440,6 +440,15 @@ def batch_norm_threshold(
         data,
         threshold,
         name="batch_norm_threshold"):
+    return hcl.compute(data.shape, lambda i, c, h, w: hcl.select(
+                    data[i, c, h, w] > threshold[c, h, w],
+                    1, # quantize
+                    0), name=name, dtype=qtype_bit)
+
+def packed_batch_norm_threshold(
+        data,
+        threshold,
+        name="packed_batch_norm_threshold"):
     batch, channel, out_height, out_width = data.shape
     bitwidth = channel # pack channels
     def genpack(i, c, h, w):

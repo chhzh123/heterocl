@@ -2,6 +2,7 @@ from . import api
 from ._ffi.function import register_func
 import os, subprocess, time, re
 from ..report import parse_xml
+from .hardcode import add_loop_label
 debug = False
 
 def replace_text(f_name, prev, new):
