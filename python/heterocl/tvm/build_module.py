@@ -455,10 +455,10 @@ def build_fpga_kernel(sch, args, target, name="default_function"):
         if "|" in mode:
             modes = mode.split("|")
             for m in modes:
-                assert m in ["csyn", "csim", "cosim", "impl", "customized"], \
+                assert m in ["csyn", "csim", "cosim", "impl", "custom"], \
                     "not supported mode " + m
         else:
-            assert mode in ["csyn", "csim", "cosim", "impl", "customized",
+            assert mode in ["csyn", "csim", "cosim", "impl", "custom",
                             "debug", "sw_sim", "hw_sim", "hw_exe"], \
                     "not supported mode " + mode
 
@@ -467,15 +467,18 @@ def build_fpga_kernel(sch, args, target, name="default_function"):
             assert host is not None
             assert xcel is not None
 
+            target_tool = -1
+            if target.tool.name == "sdaccel": target_tool = 0
+            elif target.tool.name == "sdsoc": target_tool = 1
+            elif target.tool.name == "vitis": target_tool = 2
+            elif target.tool.name == "vivado_hls": target_tool = 3
+
             builder = getattr(codegen, "build_{0}".format(host))
-            host_code = builder(fdevice, 1)
+            host_code = builder(fdevice, 1, target_tool)
             builder = getattr(codegen, "build_{0}".format(xcel))
             # TODO: It would be better to pass dict to builder,
-            #       similar to sim/impl
-            if target.tool.name == "vivado_hls":
-                xcel_code = builder(fdevice, 3)
-            else: # sdaccel
-                xcel_code = builder(fdevice, 2)
+            #       similar to sim/impl: builder(fdevice, keys, vals)
+            xcel_code = builder(fdevice, 2, target_tool)
             return "------ Host Code ------\n\n" + host_code + \
                    "------ Xcel Code ------\n\n" + xcel_code
 

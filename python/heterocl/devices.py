@@ -277,16 +277,16 @@ class platform(with_metaclass(env, object)):
         if compile == "vivado_hls" and mode == None: # set default mode
             mode = "csim"
 
-        if script: # customized script
+        if script: # custom script
             # need to be context string instead of file path
             self.tool.script = script
-            mode = "customized"
+            mode = "custom"
         else:
             self.tool.script = ""
 
         if mode: # check tool mode 
             if compile == "vivado_hls":
-                if mode not in ["customized","debug"]:
+                if mode not in ["custom","debug"]:
                     input_modes = mode.split("|")
                     modes = ["csim", "csyn", "cosim", "impl"]
                     new_modes = []

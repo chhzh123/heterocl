@@ -49,12 +49,12 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
             print("[{}] Simulation runtime {}".format(
                 time.strftime("%H:%M:%S", time.gmtime()), runtime))
 
-        elif "csyn" in mode or mode == "customized":
+        elif "csyn" in mode or mode == "custom":
             cmd += "vivado_hls"
             print("[{}] Begin synthesizing project ...".format(
                 time.strftime("%H:%M:%S", time.gmtime())))
             subprocess.Popen(cmd, shell=True).wait()
-            if mode != "customized":
+            if mode != "custom":
                 out = parse_xml("project", print_flag=True)
 
         else:
@@ -151,7 +151,7 @@ def copy_and_compile(platform, mode, backend, host_only, cfg, script):
     elif platform == "vivado_hls":
         os.system("cp " + path + "vivado/* project/")
         os.system("cp " + path + "harness.mk project/")
-        if mode != "customized":
+        if mode != "custom":
             removed_mode = ["csyn","csim","cosim","impl"]
             selected_mode = mode.split("|")
             for s_mode in selected_mode:
@@ -167,8 +167,8 @@ def copy_and_compile(platform, mode, backend, host_only, cfg, script):
                         new_tcl += "#" + line
                     else:
                         new_tcl += line
-        else: # customized tcl
-            print("Warning: Customized Tcl file is used, and target mode becomes invalid.")
+        else: # custom tcl
+            print("Warning: custom Tcl file is used, and target mode becomes invalid.")
             new_tcl = script
 
         with open("project/run.tcl","w") as tcl_file:
