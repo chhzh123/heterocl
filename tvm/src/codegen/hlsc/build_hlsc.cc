@@ -64,7 +64,6 @@ std::string BuildHLSC(
     case OutputMode::HostDevice : {code = cg.Finish(); break;}
     case OutputMode::HostOnly   : {code = cg.GetHost(); break;}
     case OutputMode::DeviceOnly : {code = cg.GetDevice(); break;}
-    case OutputMode::VHLSDevice : {code = cg.GetDevice(); break;}
     default:
       LOG(FATAL) << "Unsupported output mode";
   }

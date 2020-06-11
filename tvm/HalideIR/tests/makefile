@@ -1,4 +1,4 @@
-CFLAGS += -Wall -g -std=c++11 -O2 -fPIC -I../src -I../../dmlc-core/include
+CFLAGS += -Wall -std=c++11 -O2 -fPIC -I../src -I../../dmlc-core/include
 
 .PHONY: all clean
 .PRECIOUS: bin/% obj/%.o

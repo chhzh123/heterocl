@@ -3,7 +3,7 @@
 all: bin/mock
 
 LDFLAGS =
-CFLAGS = -g -Wall -O3 -Iinclude -Icontrib
+CFLAGS = -Wall -O3 -Iinclude -Icontrib
 CXXFLAGS = -std=c++11 $(CFLAGS)
 
 SRC = $(wildcard contrib/*.cc contrib/*.c)
