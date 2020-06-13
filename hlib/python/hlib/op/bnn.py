@@ -107,27 +107,24 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
         ('j', out_dim),
         ('i', batch),
         ('app_name', tvm.make.StringImm('mm'))])
-    xor = hcl.compute((batch, out_dim, in_dim), lambda i, j, u:
-            data[i, u] ^ weight[j, u],
-            name=name+"_xor",
-            attrs=attrs)
     rb = hcl.reduce_axis(0, bitwidth, name=name+"_rb")
     if bias is not None:
         matmul = hcl.compute((batch, out_dim), lambda i, j:
-                sum(xor[i, j, rk][rb], # popcount
+                sum((data[i, rk] ^ weight[j, rk])[rb], # popcount
                 axis=[rk, rb],name=name+"_popcnt",dtype=data.dtype),
                 name=name+"_matmul",dtype=data.dtype)
+    if not use_relu:
         matmul = hcl.compute((batch, out_dim), lambda i, j:
                 (in_dim * bitwidth - (matmul[i, j] << 1)) * var_w + bias[j],
-                name=(name+"_bias" if use_relu else name),
+                name=name,
                 attrs=attrs,
                 dtype=bias.dtype)
-    def genpack(i, j):
-        out = hcl.scalar(0, name=name+"_pack", dtype=data.dtype)
-        with hcl.for_(0, bitwidth) as k:
-            out[0][(k+1) : k] = hcl.select(matmul[i, j*bitwidth+k] > 0, 1, 0)
-        return out[0]
-    if use_relu:
+    else:
+        def genpack(i, j):
+            out = hcl.scalar(0, name=name+"_pack", dtype=data.dtype)
+            with hcl.for_(0, bitwidth) as k:
+                out[0][(k+1) : k] = hcl.select(((in_dim * bitwidth - (matmul[i, j*bitwidth+k] << 1)) * var_w + bias[j*bitwidth+k]) > 0, 1, 0)
+            return out[0]
         matmul = hcl.compute(
             (batch, out_dim // bitwidth),
             genpack,
