@@ -501,10 +501,11 @@ void CodeGenVivadoHLS::VisitStmt_(const StreamStmt* op) {
   switch (op->stream_type) {
     case StreamType::FIFO:
     case StreamType::DoubleBuffer:
+    case StreamType::Copy:
       PrintIndent();
-      stream << vid << " << ";
+      stream << vid << ".write(";
       PrintExpr(op->value, stream);
-      stream << ";\n";
+      stream << ");\n";
       break;
   }
 }
@@ -575,18 +576,23 @@ void CodeGenVivadoHLS::VisitStmt_(const KernelDef* op) {
   // print kernel function
   if (op->name.find("test") != std::string::npos) {
 
-    xcel_scope = true;
     int stream_arg_num = 0;
     // extract the memory port information
     std::unordered_map<int, std::vector<int>> mem_mapping;
     CHECK(op->channels.size() == op->args.size());
     for (size_t i = 0; i < op->channels.size();i++) {
       auto info = op->channels[i];
-      CHECK(info.size() == 6);
-      auto pos = info[0].as<IntImm>()->value;
-      int mem = info[4].as<IntImm>()->value;
-      int port = info[5].as<IntImm>()->value;
-      mem_mapping[pos] = {mem, port};
+      CHECK(info.size() == 7);
+      auto pos         = info[0].as<IntImm>()->value;
+      // auto channel   = info[1].as<IntImm>()->value;
+      // auto depth     = info[2].as<IntImm>()->value;
+      // auto is_sender = info[3].as<IntImm>()->value;
+      int mem          = info[4].as<IntImm>()->value;
+      int port         = info[5].as<IntImm>()->value;
+      int stream_type  = info[6].as<IntImm>()->value;
+      mem_mapping[pos] = {mem, port, stream_type}; 
+      if (static_cast<StreamType>(stream_type) == StreamType::FIFO) 
+        stream_arg_num += 1;
     }
 
     // used as OpenCL kernel
@@ -781,7 +787,6 @@ void CodeGenVivadoHLS::VisitStmt_(const KernelDef* op) {
       stream << "}\n";
 
     }
-    xcel_scope = false;
 
   } else { // regular vhls function
 
