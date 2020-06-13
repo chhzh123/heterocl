@@ -224,6 +224,7 @@ def packed_conv2d_nchw(
         padding=[0, 0],
         dilation=[1, 1],
         out_dtype=None,
+        threshold=None,
         name='packed_binary_conv2d'):
     if out_dtype is None or out_dtype == '':
         out_dtype = hcl.Int()
@@ -273,30 +274,34 @@ def packed_conv2d_nchw(
         const = 0xffff
     elif bitwidth == 32:
         const = 0xffffffff
-    if in_channel != 1:
+    if threshold == None:
+        rc_ = rc if in_channel != 1 else 0
         out = hcl.compute(
             (batch, out_channel, out_height, out_width),
             lambda nn, ff, yy, xx: hcl.sum(
                 hcl.select(
                     if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                    # ((1 - temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]) << 1) - 1,
-                    # (_popcount(const - (temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]),bitwidth) << 1) - bitwidth,
-                    ((const - (temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]))[rb] << 1) - 1,
+                    ((const - (temp[nn, rc_, yy + ry, xx + rx] ^ Filter[ff, rc_, ry, rx]))[rb] << 1) - 1,
                     0),
                 axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
                 name=name,
                 dtype=out_dtype)
     else:
-        out = hcl.compute(
-            (batch, out_channel, out_height, out_width),
-            lambda nn, ff, yy, xx: hcl.sum(
-                hcl.select(
-                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                    ((const - (temp[nn, 0, yy + ry, xx + rx] ^ Filter[ff, 0, ry, rx]))[rb] << 1) - 1,
-                    0),
-                axis=[ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
-                name=name,
-                dtype=out_dtype)
+        bitwidth = out_channel
+        rc_ = rc if in_channel != 1 else 0
+        def genpack(nn, ff, yy, xx):
+            out = hcl.scalar(0, name=name+"_pack", dtype=hcl.UInt(bitwidth))
+            with hcl.for_(0, bitwidth) as k:
+                out[0][(k+1) : k] = hcl.select(
+                    hcl.sum(hcl.select(
+                        if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                        ((const - (temp[nn, rc_, yy + ry, xx + rx] ^ Filter[ff*bitwidth+k, rc_, ry, rx]))[rb] << 1) - 1,
+                    0), axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum")
+                    > threshold[ff*bitwidth+k, yy, xx],
+                    1, 0)
+            return out[0]
+        return hcl.compute((batch, out_channel // bitwidth, out_height, out_width),
+                            genpack, name=name, dtype=hcl.UInt(bitwidth))
     return out
 
 def max_pool2d_nchw(
