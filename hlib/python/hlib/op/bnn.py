@@ -190,20 +190,34 @@ def conv2d_nchw(
     rc = hcl.reduce_axis(0, channel, name='rc')
     ry = hcl.reduce_axis(0, kernel_h, name='ry')
     rx = hcl.reduce_axis(0, kernel_w, name='rx')
-    kernel_size = kernel_h * kernel_w
-    out = hcl.compute(
-        (batch, out_channel, out_height, out_width),
-        lambda nn, ff, yy, xx: hcl.sum(
-            hcl.select(
-                if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                ((1 - temp[nn, rc, yy * stride_h + ry * dilation_h,
-                            xx * stride_w + rx * dilation_w] ^
-                         Filter[ff, rc, ry, rx])
-                << 1) - 1, # xnor
-                0),
-            axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
-            name=name,
-            dtype=out_dtype)
+    if channel > 1:
+        out = hcl.compute(
+            (batch, out_channel, out_height, out_width),
+            lambda nn, ff, yy, xx: hcl.sum(
+                hcl.select(
+                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                    ((1 - temp[nn, rc, yy * stride_h + ry * dilation_h,
+                                xx * stride_w + rx * dilation_w] ^
+                            Filter[ff, rc, ry, rx])
+                    << 1) - 1, # xnor
+                    0),
+                axis=[rc, ry, rx], dtype=out_dtype, name=name+"_sum"),
+                name=name,
+                dtype=out_dtype)
+    else: # TODO: otherwise, reuse_at may cause bug
+        out = hcl.compute(
+            (batch, out_channel, out_height, out_width),
+            lambda nn, ff, yy, xx: hcl.sum(
+                hcl.select(
+                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                    ((1 - temp[nn, 0, yy * stride_h + ry * dilation_h,
+                                xx * stride_w + rx * dilation_w] ^
+                            Filter[ff, 0, ry, rx])
+                    << 1) - 1, # xnor
+                    0),
+                axis=[ry, rx], dtype=out_dtype, name=name+"_sum"),
+                name=name,
+                dtype=out_dtype)
     return out
 
 def packed_conv2d_nchw(
@@ -262,18 +276,30 @@ def packed_conv2d_nchw(
         const = 0xffff
     elif bitwidth == 32:
         const = 0xffffffff
-    out = hcl.compute(
-        (batch, out_channel, out_height, out_width),
-        lambda nn, ff, yy, xx: hcl.sum(
-            hcl.select(
-                if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                # ((1 - temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]) << 1) - 1,
-                # (_popcount(const - (temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]),bitwidth) << 1) - bitwidth,
-                ((const - (temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]))[rb] << 1) - 1,
-                0),
-            axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
-            name=name,
-            dtype=out_dtype)
+    if in_channel != 1:
+        out = hcl.compute(
+            (batch, out_channel, out_height, out_width),
+            lambda nn, ff, yy, xx: hcl.sum(
+                hcl.select(
+                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                    # ((1 - temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]) << 1) - 1,
+                    # (_popcount(const - (temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]),bitwidth) << 1) - bitwidth,
+                    ((const - (temp[nn, rc, yy + ry, xx + rx] ^ Filter[ff, rc, ry, rx]))[rb] << 1) - 1,
+                    0),
+                axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
+                name=name,
+                dtype=out_dtype)
+    else:
+        out = hcl.compute(
+            (batch, out_channel, out_height, out_width),
+            lambda nn, ff, yy, xx: hcl.sum(
+                hcl.select(
+                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                    ((const - (temp[nn, 0, yy + ry, xx + rx] ^ Filter[ff, 0, ry, rx]))[rb] << 1) - 1,
+                    0),
+                axis=[ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
+                name=name,
+                dtype=out_dtype)
     return out
 
 def max_pool2d_nchw(
