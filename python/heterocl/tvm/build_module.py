@@ -377,11 +377,15 @@ def lower(sch,
     for f in lower_phase3:
         stmt = f(stmt)
 
-    def func(stmt):
-        pass
+    def func(*vcnt):
+        store, load, op, loop = vcnt
+        print("Store:",vcnt[0])
+        print("Load:",vcnt[1])
+        print("Op:",vcnt[2])
+        print("Loop:",vcnt[3])
+        print("Arithmetic density:",float(op) / float(load+store))
 
     ir_pass.InfoCollect(stmt, func)
-    print("Done info collection")
 
     if simple_mode:
         return stmt
