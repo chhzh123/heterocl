@@ -80,6 +80,13 @@ TVM_REGISTER_API("ir_pass.PostOrderVisit")
       });
   });
 
+TVM_REGISTER_API("ir_pass.InfoCollect")
+.set_body([](TVMArgs args, TVMRetValue *ret) {
+    Stmt stmt = args[0];
+    PackedFunc f = args[1];
+    ir::InfoCollect(stmt, f);
+  });
+
 // make from two arguments
 #define REGISTER_PASS1(PassName)                                  \
   TVM_REGISTER_API("ir_pass."#PassName)                           \

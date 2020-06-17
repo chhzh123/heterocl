@@ -376,6 +376,13 @@ def lower(sch,
     stmt = ir_pass.InferStream(stmt, arg_list)
     for f in lower_phase3:
         stmt = f(stmt)
+
+    def func(stmt):
+        pass
+
+    ir_pass.InfoCollect(stmt, func)
+    print("Done info collection")
+
     if simple_mode:
         return stmt
 
