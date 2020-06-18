@@ -379,11 +379,12 @@ def lower(sch,
 
     def func(*vcnt):
         store, load, op, loop = vcnt
-        print("Store:",vcnt[0])
-        print("Load:",vcnt[1])
-        print("Op:",vcnt[2])
-        print("Loop:",vcnt[3])
-        print("Arithmetic density:",float(op) / float(load+store))
+        access = (store+load)/(1024 * 1024)
+        op = op / (10**6)
+        density = float(op) / float(access)
+        print("Store + Load: {} B + {} B = {} MB".format(store,load,access))
+        print("# op: {} GFLOS".format(op / 1000))
+        print("Arithmetic density:",density)
 
     ir_pass.InfoCollect(stmt, func)
 
