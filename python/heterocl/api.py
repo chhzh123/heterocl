@@ -253,7 +253,7 @@ def create_schedule_from_scheme(scheme):
             i.last_update = i.first_update
     return create_schedule(scheme.inputs, scheme.func)
 
-def lower(schedule):
+def lower(schedule,profiler=None):
     """Get the generated IR of a given schedule.
 
     Parameters
@@ -273,9 +273,9 @@ def lower(schedule):
             new_inputs.append(i._op.op.output(0))
         else:
             new_inputs.append(i.var)
-    return _lower(schedule.sch, new_inputs, simple_mode=True)
+    return _lower(schedule.sch, new_inputs, simple_mode=True, profiler=profiler)
 
-def build(schedule, target=None, name="default_function", stmt=None):
+def build(schedule, target=None, name="default_function", stmt=None, profiler=None):
     """Build the executable according to the schedule and target.
 
     The default target is `llvm` (i.e., CPU execution). If stmt is specified,
@@ -315,7 +315,7 @@ def build(schedule, target=None, name="default_function", stmt=None):
                 tpl = tuple(shapes)
                 stmt = _make.AttrStmt([i.buf, i.tensor], "buffer_bind_scope",
                         call_intrin('handle', 'tvm_tuple', *tpl), stmt)
-    return _build(schedule.sch, new_inputs, target=target, name=name, stmt=stmt)
+    return _build(schedule.sch, new_inputs, target=target, name=name, stmt=stmt, profiler=profiler)
 
 ##############################################################################
 # Other useful APIs

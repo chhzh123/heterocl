@@ -25,7 +25,7 @@ from . import target as _target
 from . import make
 from .runtime import *
 from ..devices import platform
-from .. import profiler
+from .. import profiler as pf
 
 class DumpIR(object):
     """
@@ -289,7 +289,8 @@ def lower(sch,
           binds=None,
           simple_mode=False,
           kernel_only=False,
-          stmt=None):
+          stmt=None,
+          profiler=None):
     """Lowering step before build into target.
 
     Parameters
@@ -378,7 +379,8 @@ def lower(sch,
     for f in lower_phase3:
         stmt = f(stmt)
 
-    ir_pass.InfoCollect(stmt, profiler.roofline)
+    if profiler != None and isinstance(profiler,pf.Profiler):
+        ir_pass.InfoCollect(stmt, profiler.get_info)
 
     if simple_mode:
         return stmt
@@ -388,7 +390,7 @@ def lower(sch,
     else:
         return ir_pass.MakeAPI(stmt, name, arg_list, 0, cfg.restricted_func)
 
-def build_fpga_kernel(sch, args, target, name="default_function"):
+def build_fpga_kernel(sch, args, target, name="default_function", profiler=None):
     """Build an FPGA kernel.
 
     Parameters
@@ -423,7 +425,7 @@ def build_fpga_kernel(sch, args, target, name="default_function"):
     else:
         BuildConfig.current = build_config()
 
-    flist = lower(sch, args, kernel_only=True, name=name)
+    flist = lower(sch, args, kernel_only=True, name=name, profiler=profiler)
     if isinstance(flist, container.LoweredFunc):
         flist = [flist]
     fdevice = [ir_pass.LowerIntrin(x, str(target)) for x in flist]
@@ -480,8 +482,6 @@ def build_fpga_kernel(sch, args, target, name="default_function"):
             builder = getattr(codegen, "build_{0}".format(host))
             host_code = builder(fdevice, 1, target_tool)
             builder = getattr(codegen, "build_{0}".format(xcel))
-            # TODO: It would be better to pass dict to builder,
-            #       similar to sim/impl: builder(fdevice, keys, vals)
             xcel_code = builder(fdevice, 2, target_tool)
             return "------ Host Code ------\n\n" + host_code + \
                    "------ Xcel Code ------\n\n" + xcel_code
@@ -515,7 +515,8 @@ def build(sch,
           target_host=None,
           name="default_function",
           binds=None,
-          stmt=None):
+          stmt=None,
+          profiler=None):
     """Build a function with arguments as signiture.
 
     Parameters
@@ -555,12 +556,12 @@ def build(sch,
     See the note on :any:`tvm.target` on target string format.
     """
     if isinstance(target, platform):
-        return build_fpga_kernel(sch, args, target, name=name)
+        return build_fpga_kernel(sch, args, target, name=name, profiler=profiler)
     else: # default string type target
         target = _target.current_target() if target is None else target
         target = _target.create(target) if target else _target.create("llvm")
         if "fpga" in target.keys:
-            return build_fpga_kernel(sch, args, target.target_name, name=name)
+            return build_fpga_kernel(sch, args, target.target_name, name=name, profiler=profiler)
     BuildConfig.current = build_config()
 
     if isinstance(sch, schedule._Schedule):
@@ -569,7 +570,8 @@ def build(sch,
         flist = lower(sch, args,
                       name=name,
                       binds=binds,
-                      stmt=stmt)
+                      stmt=stmt,
+                      profiler=profiler)
         if isinstance(flist, container.LoweredFunc):
             flist = [flist]
     elif isinstance(sch, container.LoweredFunc):
