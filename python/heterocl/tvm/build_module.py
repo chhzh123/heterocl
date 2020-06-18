@@ -25,7 +25,7 @@ from . import target as _target
 from . import make
 from .runtime import *
 from ..devices import platform
-from . import profiler
+from .. import profiler
 
 class DumpIR(object):
     """
