@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from .report import parse_xml
 
 """
 Ref: https://www.xilinx.com/support/documentation/data_sheets/ds190-Zynq-7000-Overview.pdf
@@ -19,23 +20,37 @@ class Profiler():
         self.compute_roof = 276 * 1000 * 1000 * 1000 # FLOP/s
         self.ridge_point = self.compute_roof / self.bandwidth_roof
 
+    def clear(self):
+        self.perf = {}
+
     def get_info(self,*vcnt):
+        """
+        PackedFunc
+        Do not call this function directly!
+        """
         self.perf["store"] = vcnt[0]
         self.perf["load"] = vcnt[1]
         self.perf["op"] = vcnt[2]
-        self.perf["loop"] = vcnt[3]
-        access = (self.perf["store"] + self.perf["load"])/ (10**6)
-        op_ = self.perf["op"] / (10**6)
-        self.perf["ai"] = float(op_) / float(access) # arithmetic intensity
-        self.perf["perf"] = op_/op_ * self.clock # FLOP/cycles * cycles/s -> FLOP/s
-        print("Store + Load: {} B + {} B = {} MB".format(self.perf["store"],self.perf["load"],access))
-        print("# of ops: {} GFLOS".format(op_ / 1000))
+        self.perf["ai"] = float(self.perf["op"]) / float(self.perf["store"] + self.perf["load"]) # arithmetic intensity
+        print("Store + Load: {} B + {} B = {} B".format(self.perf["store"],self.perf["load"],self.perf["store"] + self.perf["load"]))
+        print("# of ops: {} GFLOS".format(self.perf["op"] / 10**9))
         print("Arithmetic density: {} FLOPs/Byte".format(self.perf["ai"]))
         print("Ridge point: {} FLOPs/Byte".format(self.ridge_point))
+        print("I/O bandwidth roof: {:.2f} GB/s".format(self.bandwidth_roof/10**9))
+        print("Compute roof: {:.2f} GFLOP/s".format(self.compute_roof/10**9))
         if self.ridge_point > self.perf["ai"]:
             print("Memory bound!")
         else:
             print("Computation bound!")
+
+    def profile_report(self,f=None,target=None):
+        if f != None and target != None:
+            report = f.report(target)
+        else:
+            report = parse_xml("project")
+        latency = report["PerformanceEstimates"]["SummaryOfOverallLatency"]["Best-caseLatency"]
+        self.perf["perf"] = self.perf["op"] / int(latency) * self.clock # FLOP/cycles * cycles/s -> FLOP/s
+        print("Real performance: {} GFLOP/s".format(self.perf["perf"]/(10**9)))
 
     def roofline(self,log_plot=True,filename="roofline.png"):
         """
@@ -47,7 +62,6 @@ class Profiler():
         sample_interval = 1
         x = np.arange(0,max_x,sample_interval).astype(np.int64)
         y = np.minimum(x * self.bandwidth_roof, np.ones(x.shape) * self.compute_roof)
-        # plot roofline model
         fig = plt.figure()
         ax = fig.gca()
         if log_plot:
@@ -61,7 +75,7 @@ class Profiler():
         ax.yaxis.grid(color='gray', linestyle='dashed')
         plt.title("Roofline Model")
         plt.xlabel("Arithmetic density (FLOPs/Byte)")
-        plt.ylabel("Performance (GFLOPs/sec)")
+        plt.ylabel("Performance (FLOPs/sec)")
         plt.legend(loc=0)
         plt.tight_layout()
         plt.savefig(filename)
