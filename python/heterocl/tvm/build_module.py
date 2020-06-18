@@ -25,6 +25,7 @@ from . import target as _target
 from . import make
 from .runtime import *
 from ..devices import platform
+from . import profiler
 
 class DumpIR(object):
     """
@@ -377,16 +378,7 @@ def lower(sch,
     for f in lower_phase3:
         stmt = f(stmt)
 
-    def func(*vcnt):
-        store, load, op, loop = vcnt
-        access = (store+load)/(1024 * 1024)
-        op = op / (10**6)
-        density = float(op) / float(access)
-        print("Store + Load: {} B + {} B = {} MB".format(store,load,access))
-        print("# op: {} GFLOS".format(op / 1000))
-        print("Arithmetic density:",density)
-
-    ir_pass.InfoCollect(stmt, func)
+    ir_pass.InfoCollect(stmt, profiler.roofline)
 
     if simple_mode:
         return stmt
