@@ -18,6 +18,18 @@ class Module(ModuleBase):
     def __repr__(self):
         return "Module(%s, %x)" % (self.type_key, self.handle.value)
 
+    def __call__(self, *args):
+        if self._entry:
+            ret = self._entry(*args)
+            if "profiler" in self.__dict__.keys() and self.profiler != None:
+                self.profiler.profile_report()
+            return ret
+        f = self.entry_func
+        ret = f(*args)
+        if "profiler" in self.__dict__.keys() and self.profiler != None:
+            self.profiler.profile_report()
+        return ret
+
     @property
     def type_key(self):
         """Get type key of the module."""
@@ -50,7 +62,10 @@ class Module(ModuleBase):
         nmod = _ImportsSize(self)
         return [_GetImport(self, i) for i in range(nmod)]
 
-    def report(self, target):
+    def report(self):
+        if "target" not in self.__dict__.keys():
+            raise RuntimeError("No attached target!")
+        target = self.target
         if target.tool.name == "vivado_hls":
             if "csyn" not in target.tool.mode:
                 raise RuntimeError("Not supported mode {}. Use csyn mode to retrieve the report instead.".format(target.tool.mode))
