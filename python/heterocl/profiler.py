@@ -83,10 +83,13 @@ class Profiler():
             plt.vlines(x=self.perf["ai"][i], ymin=0, ymax=min(self.perf["ai"][i] * self.bandwidth_roof, self.compute_roof), linestyle="--",color="orange")
         ax.set_axisbelow(True)
         ax.yaxis.grid(color='gray', linestyle='dashed')
+        for i, point in enumerate(zip(self.perf["ai"],self.perf["perf"])):
+            ax.annotate("$s_{}$".format(i+1), point, textcoords="offset points",
+                        xytext=(5,0))
         plt.title("Roofline Model")
         plt.xlabel("Arithmetic density (FLOPs/Byte)")
         plt.ylabel("Performance (FLOPs/sec)")
         plt.legend(loc=0)
         plt.tight_layout()
-        plt.savefig(filename)
+        plt.savefig(filename,dpi=300)
         plt.show()
