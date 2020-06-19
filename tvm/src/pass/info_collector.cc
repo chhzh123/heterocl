@@ -105,8 +105,7 @@ class InfoCollector final : public IRVisitor {
       this->loop_var_map[op->loop_var->name_hint] = extent;
       LOG(INFO) << "For " << op->loop_var << " " << min_val << " " << (min_val + extent);
       this->Visit(op->body);
-      if (op->body.as<For>())
-        this->temp_op_cnt *= extent;
+      this->temp_op_cnt *= extent;
     }
 
     void Visit_(const Add *op) final {

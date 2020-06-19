@@ -15,9 +15,9 @@ class Profiler():
 
     def __init__(self):
         self.perf = {}
-        self.clock = 100 * 1000 * 1000 # MHz = 10e8 cycles/s 10ns/cycle
+        self.clock = 10 # ns/cycle
         self.bandwidth_roof = 1600 * 1000 * 1000 * 8 # B/s
-        self.compute_roof = 276 * 1000 * 1000 * 1000 # FLOP/s
+        self.compute_roof = 276 * 2 * 1000 * 1000 * 1000 # FLOP/s ~ 0.5MAC/s
         self.ridge_point = self.compute_roof / self.bandwidth_roof
         self.initialize_perf()
 
@@ -43,7 +43,7 @@ class Profiler():
         self.perf["ai"].append(float(self.perf["op"][-1]) / float(self.perf["store"][-1] + self.perf["load"][-1])) # arithmetic intensity
         print("Store + Load: {} B + {} B = {} B".format(self.perf["store"][-1],self.perf["load"][-1],self.perf["store"][-1] + self.perf["load"][-1]))
         print("# of ops: {} GFLOS".format(self.perf["op"][-1] / 10**9))
-        print("Arithmetic density: {} FLOPs/Byte".format(self.perf["ai"][-1]))
+        print("Arithmetic intensity: {} FLOPs/Byte".format(self.perf["ai"][-1]))
         print("Ridge point: {} FLOPs/Byte".format(self.ridge_point))
         print("I/O bandwidth roof: {:.2f} GB/s".format(self.bandwidth_roof/10**9))
         print("Compute roof: {:.2f} GFLOP/s".format(self.compute_roof/10**9))
@@ -57,8 +57,9 @@ class Profiler():
             report = f.report(target)
         else:
             report = parse_xml("project")
-        latency = report["PerformanceEstimates"]["SummaryOfOverallLatency"]["Best-caseLatency"]
-        self.perf["perf"].append(self.perf["op"][-1] / int(latency) * self.clock) # FLOP/cycles * cycles/s -> FLOP/s
+        latency = int(report["PerformanceEstimates"]["SummaryOfOverallLatency"]["Best-caseLatency"])
+        est_clock = float(report["PerformanceEstimates"]["SummaryOfTimingAnalysis"]["EstimatedClockPeriod"])
+        self.perf["perf"].append(float(self.perf["op"][-1]) / float(latency) / float(est_clock*(10**(-9)))) # FLOP/cycles * cycles/s -> FLOP/s
         print("Real performance: {} GFLOP/s".format(self.perf["perf"][-1]/(10**9)))
 
     def roofline(self,log_plot=True,filename="roofline.png"):
@@ -87,7 +88,7 @@ class Profiler():
             ax.annotate("$s_{}$".format(i+1), point, textcoords="offset points",
                         xytext=(5,0))
         plt.title("Roofline Model")
-        plt.xlabel("Arithmetic density (FLOPs/Byte)")
+        plt.xlabel("Arithmetic intensity (FLOPs/Byte)")
         plt.ylabel("Performance (FLOPs/sec)")
         plt.legend(loc=0)
         plt.tight_layout()
