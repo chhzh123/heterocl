@@ -503,6 +503,10 @@ def build_fpga_kernel(sch, args, target, name="default_function", profiler=None)
                 vals.insert(3, target.tool.script)
             else:
                 vals.insert(3, "")
+            keys.insert(4, "project")
+            vals.insert(4, target.project)
+            # make the project folder first
+            os.makedirs(target.project, exist_ok=True)
             f = builder(fdevice, keys, vals)
             f.target = target
             f.profiler = profiler
