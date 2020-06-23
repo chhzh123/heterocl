@@ -22,12 +22,12 @@ class Module(ModuleBase):
         if self._entry:
             ret = self._entry(*args)
             if "profiler" in self.__dict__.keys() and self.profiler != None:
-                self.profiler.profile_report()
+                self.profiler.profile_report(self)
             return ret
         f = self.entry_func
         ret = f(*args)
         if "profiler" in self.__dict__.keys() and self.profiler != None:
-            self.profiler.profile_report()
+            self.profiler.profile_report(self)
         return ret
 
     @property

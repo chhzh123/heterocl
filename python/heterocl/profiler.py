@@ -59,9 +59,9 @@ class Profiler():
         else:
             print("Computation bound!")
 
-    def profile_report(self,func=None,target=None):
-        if func != None and target != None:
-            report = func.report(target)
+    def profile_report(self,func=None):
+        if func != None:
+            report = func.report()
         else:
             raise RuntimeError("Please pass in func and target")
         latency = int(report["PerformanceEstimates"]["SummaryOfOverallLatency"]["Best-caseLatency"])

@@ -73,7 +73,7 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
             replace_text(os.path.join(Project.path,"Makefile"), "kernel.cpp", "")
             replace_text(os.path.join(Project.path,"host.cpp"), "#include \"kernel.h\"", "")
 
-        add_loop_label("project/kernel.cpp")
+        add_loop_label(os.path.join(Project.path,"kernel.cpp"))
 
         cmd = "cd {}; make ".format(Project.path)
         if mode == "csim":
