@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from .report import parse_xml
+from .tvm.expr import OpType
 
 """
 Ref: https://www.xilinx.com/support/documentation/data_sheets/ds190-Zynq-7000-Overview.pdf
@@ -13,13 +14,19 @@ Data rate: Up to 1,600 MT/s
 
 class Profiler():
 
-    def __init__(self):
+    def __init__(self,op=None):
         self.perf = {}
         self.clock = 10 # ns/cycle
         self.bandwidth_roof = 1600 * 1000 * 1000 * 8 # B/s
         self.compute_roof = 276 * 2 * 1000 * 1000 * 1000 # FLOP/s ~ 0.5MAC/s
         self.ridge_point = self.compute_roof / self.bandwidth_roof
         self.initialize_perf()
+        if op == None:
+            self.op = list(range(11))
+        else:
+            if not (type(op) == list):
+                raise RuntimeError("op is not a list of hcl.Op")
+            self.op = op
 
     def clear(self):
         self.perf = {}

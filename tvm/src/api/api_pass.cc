@@ -84,7 +84,8 @@ TVM_REGISTER_API("ir_pass.InfoCollect")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
     Stmt stmt = args[0];
     PackedFunc f = args[1];
-    ir::InfoCollect(stmt, f);
+    Array<Expr> ops = args[2];
+    ir::InfoCollect(stmt, f, ops);
   });
 
 // make from two arguments

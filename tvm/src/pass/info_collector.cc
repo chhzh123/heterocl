@@ -1,6 +1,5 @@
 #include <tvm/ir.h>
 #include <tvm/ir_visitor.h>
-#include <tvm/buffer.h>
 #include <unordered_set>
 #include <stack>
 
@@ -9,13 +8,14 @@ namespace ir {
 
 class InfoCollector final : public IRVisitor {
   public:
-    explicit InfoCollector() {
+    explicit InfoCollector(std::vector<bool>& opv) {
       std::stack<std::string> pc;
       std::stack<std::string> store;
       std::stack<std::string> load;
       this->node_stack["ProducerConsumer"] = pc;
       this->node_stack["Store"] = store;
       this->node_stack["Load"] = load;
+      this->opv = opv;
     }
 
     void Visit(const NodeRef& node) final {
@@ -108,38 +108,39 @@ class InfoCollector final : public IRVisitor {
       this->temp_op_cnt *= extent;
     }
 
-    void Visit_(const Add *op) final {
-      LOG(INFO) << op->a << " + " << op->b;
-      if (this->node_stack["Store"].empty() && this->node_stack["Load"].empty()) {
-        LOG(INFO) << "count add";
+    void add_cnt(OpType op,std::string str) {
+      if (this->opv[int(op)] &&
+          this->node_stack["Store"].empty() &&
+          this->node_stack["Load"].empty()) {
+        LOG(INFO) << "count " << str;
         this->temp_op_cnt++;
       }
+    }
+
+    void Visit_(const Add *op) final {
+      LOG(INFO) << op->a << " + " << op->b;
+      add_cnt(OpType::Add,"Add");
       this->Visit(op->a);
       this->Visit(op->b);
     }
 
     void Visit_(const Sub *op) final {
       LOG(INFO) << op->a << " - " << op->b;
-      if (this->node_stack["Store"].empty() && this->node_stack["Load"].empty())
-        this->temp_op_cnt++;
+      add_cnt(OpType::Sub,"Sub");
       this->Visit(op->a);
       this->Visit(op->b);
     }
 
     void Visit_(const Mul *op) final {
       LOG(INFO) << op->a << " * " << op->b;
-      if (this->node_stack["Store"].empty() && this->node_stack["Load"].empty()) {
-        LOG(INFO) << "count mul";
-        this->temp_op_cnt++;
-      }
+      add_cnt(OpType::Mul,"Mul");
       this->Visit(op->a);
       this->Visit(op->b);
     }
 
     void Visit_(const Div *op) final {
       LOG(INFO) << op->a << " / " << op->b;
-      if (this->node_stack["Store"].empty() && this->node_stack["Load"].empty())
-        this->temp_op_cnt++;
+      add_cnt(OpType::Div,"Div");
       this->Visit(op->a);
       this->Visit(op->b);
     }
@@ -154,6 +155,7 @@ class InfoCollector final : public IRVisitor {
     std::map<std::string, std::stack<std::string>> node_stack;
     std::vector<std::string> store_var;
     std::vector<std::string> load_var;
+    std::vector<bool> opv;
     bool kernel_flag = true;
     int store_cnt = 0;
     int load_cnt = 0;
@@ -162,8 +164,12 @@ class InfoCollector final : public IRVisitor {
 };
 
 void InfoCollect(const NodeRef& node,
-                       std::function<void(int,int,int)> fcnt) {
-  InfoCollector collector;
+                       std::function<void(int,int,int)> fcnt,
+                       Array<Expr> ops) {
+  std::vector<bool> opv(11,false); // # of different ops
+  for (auto op : ops)
+    opv[op.as<Halide::Internal::IntImm>()->value] = true;
+  InfoCollector collector(opv);
   collector.Visit(node);
   std::vector<int> vcnt;
   int c1 = collector.get_store_cnt();

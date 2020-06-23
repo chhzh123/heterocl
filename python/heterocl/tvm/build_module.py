@@ -380,7 +380,7 @@ def lower(sch,
         stmt = f(stmt)
 
     if profiler != None and isinstance(profiler,pf.Profiler):
-        ir_pass.InfoCollect(stmt, profiler.get_info)
+        ir_pass.InfoCollect(stmt, profiler.get_info, profiler.op)
 
     if simple_mode:
         return stmt

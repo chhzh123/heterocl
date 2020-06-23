@@ -399,3 +399,16 @@ class Stream(object):
   FIFO = 0
   DoubleBuffer = 1
   Copy = 2
+
+class OpType(object):
+    Add = 0
+    Sub = 1
+    Mul = 2
+    Div = 3
+    Mod = 4
+    LShift = 5
+    RShift = 6
+    And = 7 # bitwise
+    Or = 8
+    Not = 9
+    Xor = 10
