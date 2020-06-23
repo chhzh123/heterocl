@@ -75,7 +75,7 @@ class Profiler():
             Roofline: An Insightful Visual Performance Model for
             Floating-Point Programs and Multicore Architectures
         """
-        max_x = 100 if log_plot else 60
+        max_x = 120 if log_plot else 60
         sample_interval = 1
         x = np.arange(0,max_x,sample_interval).astype(np.int64)
         y = np.minimum(x * self.bandwidth_roof, np.ones(x.shape) * self.compute_roof)
@@ -91,13 +91,18 @@ class Profiler():
             plt.vlines(x=self.perf["ai"][i], ymin=0, ymax=min(self.perf["ai"][i] * self.bandwidth_roof, self.compute_roof), linestyle="--",color="orange")
         ax.set_axisbelow(True)
         ax.yaxis.grid(color='gray', linestyle='dashed')
+        fig.canvas.draw()
+        angle_data = np.rad2deg(np.arctan2(self.bandwidth_roof*self.ridge_point, self.ridge_point))
+        angle = ax.transData.transform_angles(np.array((angle_data,)), 
+                                              np.array([0, 0]).reshape((1, 2)))[0]
+        ax.annotate("Peak Bandwidth:\n{:.2f} GB/s".format(self.bandwidth_roof/10**9),(2,2*self.bandwidth_roof), size=8, rotation=angle, textcoords="offset points",xytext=(15,0))
+        ax.annotate("Peak performance:\n{:.2f} GFLOP/s".format(self.compute_roof/10**9),(self.ridge_point,self.compute_roof),size=8, textcoords="offset points",xytext=(0,-8))
         for i, point in enumerate(zip(self.perf["ai"],self.perf["perf"])):
-            ax.annotate("$s_{}$".format(i+1), point, textcoords="offset points",
-                        xytext=(5,0))
+            ax.annotate("$s_{}$: {:.2f} GFLOP/s".format(i+1,self.perf["perf"][i]/10**9), point, textcoords="offset points",xytext=(5,0),size=8)
         plt.title("Roofline Model")
         plt.xlabel("Arithmetic intensity (FLOPs/Byte)")
         plt.ylabel("Performance (FLOPs/sec)")
         plt.legend(loc=0)
-        plt.tight_layout()
+        # plt.tight_layout()
         plt.savefig(filename,dpi=300)
         plt.show()
