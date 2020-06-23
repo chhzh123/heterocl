@@ -108,41 +108,53 @@ class InfoCollector final : public IRVisitor {
       this->temp_op_cnt *= extent;
     }
 
-    void add_cnt(OpType op,std::string str) {
+    void VisitArith(const OpType op, const std::string str,
+                    const NodeRef& node1, const NodeRef& node2,
+                    std::string opstr) {
+      LOG(INFO) << node1 << " " << opstr << " " << node2;
       if (this->opv[int(op)] &&
           this->node_stack["Store"].empty() &&
           this->node_stack["Load"].empty()) {
         LOG(INFO) << "count " << str;
         this->temp_op_cnt++;
       }
+      this->Visit(node1);
+      this->Visit(node2);
     }
 
     void Visit_(const Add *op) final {
-      LOG(INFO) << op->a << " + " << op->b;
-      add_cnt(OpType::Add,"Add");
-      this->Visit(op->a);
-      this->Visit(op->b);
+      VisitArith(OpType::Add,"Add",op->a,op->b,"+");
     }
 
     void Visit_(const Sub *op) final {
-      LOG(INFO) << op->a << " - " << op->b;
-      add_cnt(OpType::Sub,"Sub");
-      this->Visit(op->a);
-      this->Visit(op->b);
+      VisitArith(OpType::Sub,"Sub",op->a,op->b,"-");
     }
 
     void Visit_(const Mul *op) final {
-      LOG(INFO) << op->a << " * " << op->b;
-      add_cnt(OpType::Mul,"Mul");
-      this->Visit(op->a);
-      this->Visit(op->b);
+      VisitArith(OpType::Mul,"Mul",op->a,op->b,"*");
     }
 
     void Visit_(const Div *op) final {
-      LOG(INFO) << op->a << " / " << op->b;
-      add_cnt(OpType::Div,"Div");
-      this->Visit(op->a);
-      this->Visit(op->b);
+      VisitArith(OpType::Div,"Div",op->a,op->b,"/");
+    }
+
+    void Visit_(const Mod *op) final {
+      VisitArith(OpType::Mod,"Mod",op->a,op->b,"%");
+    }
+
+    void Visit_(const Call *op) final {
+      if (op->is_intrinsic(Call::bitwise_and))
+        VisitArith(OpType::And,"bitwise_and",op->args[0],op->args[1],"&");
+      else if (op->is_intrinsic(Call::bitwise_or))
+        VisitArith(OpType::Or,"bitwise_or",op->args[0],op->args[1],"|");
+      else if (op->is_intrinsic(Call::bitwise_not))
+        VisitArith(OpType::Not,"bitwise_not",op->args[0],op->args[1],"~");
+      else if (op->is_intrinsic(Call::bitwise_xor))
+        VisitArith(OpType::Xor,"bitwise_xor",op->args[0],op->args[1],"^");
+      else if (op->is_intrinsic(Call::shift_left))
+        VisitArith(OpType::LShift,"shift_left",op->args[0],op->args[1],"<<");
+      else if (op->is_intrinsic(Call::shift_right))
+        VisitArith(OpType::RShift,"shift_right",op->args[0],op->args[1],">>");
     }
 
     int get_store_cnt() { return store_cnt; }
