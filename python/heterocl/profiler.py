@@ -59,11 +59,11 @@ class Profiler():
         else:
             print("Computation bound!")
 
-    def profile_report(self,f=None,target=None):
-        if f != None and target != None:
-            report = f.report(target)
+    def profile_report(self,func=None,target=None):
+        if func != None and target != None:
+            report = func.report(target)
         else:
-            report = parse_xml("project")
+            raise RuntimeError("Please pass in func and target")
         latency = int(report["PerformanceEstimates"]["SummaryOfOverallLatency"]["Best-caseLatency"])
         est_clock = float(report["PerformanceEstimates"]["SummaryOfTimingAnalysis"]["EstimatedClockPeriod"])
         self.perf["perf"].append(float(self.perf["op"][-1]) / float(latency) / float(est_clock*(10**(-9)))) # FLOP/cycles * cycles/s -> FLOP/s
