@@ -395,11 +395,6 @@ class KernelExpr(Expr):
 class StreamExpr(Expr):
   pass
 
-class Stream(object):
-  FIFO = 0
-  DoubleBuffer = 1
-  Copy = 2
-
 class OpType(object):
     Add = 0
     Sub = 1
@@ -412,3 +407,9 @@ class OpType(object):
     Or = 8
     Not = 9
     Xor = 10
+
+class IO(object):
+  MMIO = 0
+  DMA  = 1
+  FIFO = 2
+  ZeroCopy = 3
