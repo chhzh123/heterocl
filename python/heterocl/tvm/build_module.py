@@ -510,11 +510,11 @@ def build_fpga_kernel(sch, args, target, name="default_function", profiler=None,
                 folder = target.project
             Project.path = folder
             vals.insert(4, folder)
-            # make the project folder first
-            os.makedirs(target.project, exist_ok=True)
+            os.makedirs(folder, exist_ok=True)
             f = builder(fdevice, keys, vals)
             f.target = target
             f.profiler = profiler
+            f.folder = folder
             return f
 
     except AttributeError:
