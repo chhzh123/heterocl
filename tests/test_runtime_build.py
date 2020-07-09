@@ -84,7 +84,7 @@ def test_vivado_hls():
         ret_B = hcl_B.asnumpy()
 
         if "csyn" in target_mode:
-            report = f.report(target)
+            report = f.report()
             assert "ReportVersion" in report
         elif "csim" in target_mode:
             np.testing.assert_array_equal(ret_B, (np_A+2)*2)
@@ -144,7 +144,7 @@ def test_vitis():
         s = hcl.create_schedule([A], kernel)
         s.to(kernel.B, target.xcel)
         s.to(kernel.C, target.host)
-        target.config(compile="vitis", mode="sw_sim")
+        target.config(compile="vitis", mode="hw_sim")
         f = hcl.build(s, target)
 
         np_A = np.random.randint(10, size=(10,32))

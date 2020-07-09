@@ -409,7 +409,7 @@ class OpType(object):
     Xor = 10
 
 class IO(object):
-  MMIO = 0
-  DMA  = 1
-  FIFO = 2
+  DMA  = 0
+  FIFO = 1
+  MMIO = 2
   ZeroCopy = 3

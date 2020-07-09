@@ -505,16 +505,17 @@ def build_fpga_kernel(sch, args, target, name="default_function", profiler=None,
                 vals.insert(3, "")
             keys.insert(4, "project")
             if schedule_name != "":
-                folder = "{}-{}".format(target.project,schedule_name)
+                folder = "{}-{}".format(schedule_name,target.project)
             else:
                 folder = target.project
             Project.path = folder
             vals.insert(4, folder)
+            # make the project folder first
             os.makedirs(folder, exist_ok=True)
             f = builder(fdevice, keys, vals)
-            f.target = target
+            f.attach_target(target)
+            f.set_name(folder)
             f.profiler = profiler
-            f.folder = folder
             return f
 
     except AttributeError:

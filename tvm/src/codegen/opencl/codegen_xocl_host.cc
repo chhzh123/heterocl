@@ -40,9 +40,6 @@ std::string CodeGenXOCLHost::GetBufferRef(Type t, const Variable* buffer, Expr i
     if (is_scalar) {
       os << vid;
     } else { 
-      // os << vid << "[";
-      // PrintExpr(index, os);
-      // os << "]";
       os << vid;
       CHECK(var_shape_map_.count(buffer)) 
         << "buffer " << buffer->name_hint << " not found in var_shape_map";
@@ -229,7 +226,9 @@ void CodeGenXOCLHost::VisitStmt_(const Allocate* op) {
       stream << "[";
       for (size_t i = 0; i < op->extents.size(); i++) {
         PrintExpr(op->extents[i], stream);
-        if (i != op->extents.size()-1) stream << "][";
+        if (i != op->extents.size()-1) {
+            stream << "][";
+        }
       }
       stream << "]";
     }
