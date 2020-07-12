@@ -726,14 +726,6 @@ void CodeGenVivadoHLS::VisitStmt_(const KernelDef* op) {
       stream << "#pragma HLS INTERFACE s_axilite"
              << " port=return bundle=control\n";
 
-      // TODO: add dataflow premitive
-      StreamChecker sc; sc.Visit(op->body);
-      if (sc.stream_fifo) {
-        stream << "\n";
-        PrintIndent();
-        stream << "#pragma HLS dataflow\n";
-      }
-
       // function body
       int func_scope = BeginScope();
       range_ = CollectIterRange(op->body);
@@ -826,13 +818,6 @@ void CodeGenVivadoHLS::VisitStmt_(const KernelDef* op) {
       PrintIndent();
       stream << "#pragma HLS INTERFACE s_axilite"
              << " port=return bundle=control\n";
-
-      StreamChecker sc; sc.Visit(op->body);
-      if (sc.stream_fifo) {
-        stream << "\n";
-        PrintIndent();
-        stream << "#pragma HLS dataflow\n";
-      }
 
       // function body
       int func_scope = BeginScope();

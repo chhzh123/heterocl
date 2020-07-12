@@ -24,10 +24,6 @@ struct ArgInfo {
 
 void CodeGenXOCLHost::AddFunction(LoweredFunc f,
         str2tupleMap<std::string, Type> map_arg_type) {
-  // write header files
-  this->decl_stream << "#include <ap_int.h>\n";
-  this->decl_stream << "#include <ap_fixed.h>\n";
-  this->decl_stream << "\n";
   CodeGenC::AddFunction(f, map_arg_type);
 }
 
