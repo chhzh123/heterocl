@@ -152,7 +152,7 @@ class TVM_DLL IRVisitor {
 void PostOrderVisit(const NodeRef& node, std::function<void(const NodeRef&)> fvisit);
 
 void InfoCollect(const NodeRef &node,
-                 std::function<void(int,int,int)> fcnt,
+                 std::function<void(int,int,int,Array<Expr>)> fcnt,
                  Array<Expr> ops);
 
 }  // namespace ir

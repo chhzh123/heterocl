@@ -80,6 +80,15 @@ class Module(ModuleBase):
         """
         self.target = target
 
+    def attach_profiler(self, profiler):
+        """Attach profiler to Module
+
+        Parameters
+        ----------
+        profiler : hcl.Profiler
+        """
+        self.profiler = profiler
+
     def report(self):
         """Get tool report
 

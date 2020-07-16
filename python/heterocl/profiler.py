@@ -38,6 +38,7 @@ class Profiler():
         self.perf["op"] = []
         self.perf["ai"] = []
         self.perf["perf"] = []
+        self.perf["latency"] = []
 
     def get_info(self,*vcnt):
         """
@@ -47,6 +48,8 @@ class Profiler():
         self.perf["store"].append(vcnt[0])
         self.perf["load"].append(vcnt[1])
         self.perf["op"].append(vcnt[2])
+        self.perf["latency"] = vcnt[3]
+        print("Latency:",self.perf["latency"])
         self.perf["ai"].append(float(self.perf["op"][-1]) / float(self.perf["store"][-1] + self.perf["load"][-1])) # arithmetic intensity
         print("Store + Load: {} B + {} B = {} B".format(self.perf["store"][-1],self.perf["load"][-1],self.perf["store"][-1] + self.perf["load"][-1]))
         print("# of ops: {} GFLOS".format(self.perf["op"][-1] / 10**9))
@@ -68,6 +71,9 @@ class Profiler():
         est_clock = float(report["PerformanceEstimates"]["SummaryOfTimingAnalysis"]["EstimatedClockPeriod"])
         self.perf["perf"].append(float(self.perf["op"][-1]) / float(latency) / float(est_clock*(10**(-9)))) # FLOP/cycles * cycles/s -> FLOP/s
         print("Real performance: {} GFLOP/s".format(self.perf["perf"][-1]/(10**9)))
+
+    def latency(self):
+        return self.perf["latency"]
 
     def roofline(self,log_plot=True,filename="roofline.png"):
         """

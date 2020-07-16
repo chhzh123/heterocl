@@ -214,7 +214,7 @@ class InfoCollector final : public IRVisitor {
 };
 
 void InfoCollect(const NodeRef& node,
-                       std::function<void(int,int,int)> fcnt,
+                       std::function<void(int,int,int,Array<Expr>)> fcnt,
                        Array<Expr> ops) {
   std::vector<bool> opv(11,false); // # of different ops
   for (auto op : ops)
@@ -226,9 +226,10 @@ void InfoCollect(const NodeRef& node,
   int c2 = collector.get_load_cnt();
   int c3 = collector.get_op_cnt();
   std::vector<int> latency = collector.get_latency();
-  for (int i = 0; i < latency.size(); ++i)
-    std::cout << "Loop " << i << " latency: " << latency[i] << std::endl;
-  fcnt(c1,c2,c3);
+  Array<Expr> latency_arr;
+  for (auto lat : latency)
+    latency_arr.push_back(IntImm::make(Int(32), lat));
+  fcnt(c1,c2,c3,latency_arr);
 }
 
 }
