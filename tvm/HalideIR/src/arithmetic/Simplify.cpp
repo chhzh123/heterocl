@@ -4792,9 +4792,19 @@ private:
             bounds_info.push(op->loop_var.get(), { new_min_int, new_max_int });
         }
 
-        if (is_one(new_extent) && op->annotate_keys.empty()) {
-          stmt = mutate(substitute(op->loop_var, 0, op->body));
-          return;
+        if (is_one(new_extent)) {
+            bool flag_keys = false;
+            for (auto key : op->annotate_keys) {
+                // have annotated keys other than stage name
+                if (key.as<StringImm>()->value != "stage_name") {
+                    flag_keys = true;
+                    break;
+                }
+            }
+            if (!flag_keys) { // no annotated keys, do simplification
+                stmt = mutate(substitute(op->loop_var, 0, op->body));
+                return;
+            }
         }
 
         Stmt new_body = mutate(op->body);
