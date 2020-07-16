@@ -104,8 +104,43 @@ class InfoCollector final : public IRVisitor {
       int extent = op->extent.as<IntImm>()->value;
       this->loop_var_map[op->loop_var->name_hint] = extent;
       LOG(INFO) << "For " << op->loop_var << " " << min_val << " " << (min_val + extent);
+      loop_trip_count.push_back(extent);
       this->Visit(op->body);
       this->temp_op_cnt *= extent;
+      // calculate latency
+      // TODO: Add validity test (e.g. nested pipelined loops)
+      bool pipeline_flag = false;
+      if (op->for_type == ForType::Pipelined) {
+        LOG(INFO) << "Pipelined loop";
+        int II = 0, i = 0;
+        for (auto key : op->annotate_keys) {
+          if (auto str = key.as<StringImm>()) {
+            auto initiation_interval = op->annotate_values[i].as<IntImm>();
+            if (str->value == "initiation_interval" &&
+                initiation_interval != nullptr) {
+              II = initiation_interval->value;
+              std::cout << "II: " << II << std::endl;
+              int lat = 1;
+              for (auto trip_count : loop_trip_count)
+                lat *= trip_count;
+              // (n - 1) * II + T_{L}
+              // assume all the ops have latency 1 here
+              lat = (lat - 1) * II + 1;
+              latency.push_back(lat);
+              pipeline_flag = true;
+              break;
+            }
+          }
+          i++;
+        }
+      }
+      // if (!pipeline_flag && !op->body.as<For>()) { // the inner-most loop
+      //   int lat = 1;
+      //   for (auto trip_count : loop_trip_count)
+      //     lat *= trip_count;
+      //   latency.push_back(lat);
+      // }
+      loop_trip_count.pop_back();
     }
 
     void VisitArith(const OpType op, const std::string str,
@@ -160,11 +195,14 @@ class InfoCollector final : public IRVisitor {
     int get_store_cnt() { return store_cnt; }
     int get_load_cnt() { return load_cnt; }
     int get_op_cnt() { return op_cnt; }
+    std::vector<int> get_latency() { return latency; }
 
   private:
     std::unordered_set<const Node*> visited_;
     std::map<std::string, int> loop_var_map;
     std::map<std::string, std::stack<std::string>> node_stack;
+    std::vector<int> loop_trip_count;
+    std::vector<int> latency;
     std::vector<std::string> store_var;
     std::vector<std::string> load_var;
     std::vector<bool> opv;
@@ -187,6 +225,9 @@ void InfoCollect(const NodeRef& node,
   int c1 = collector.get_store_cnt();
   int c2 = collector.get_load_cnt();
   int c3 = collector.get_op_cnt();
+  std::vector<int> latency = collector.get_latency();
+  for (int i = 0; i < latency.size(); ++i)
+    std::cout << "Loop " << i << " latency: " << latency[i] << std::endl;
   fcnt(c1,c2,c3);
 }
 
