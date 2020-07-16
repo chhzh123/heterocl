@@ -1,7 +1,6 @@
 from ._ffi.function import register_func
 import os, subprocess, time, re, glob
 from ..report import parse_xml
-from .hardcode import add_loop_label
 from ..devices import Project
 debug = True
 
@@ -71,8 +70,6 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
         if not os.path.isfile(os.path.join(Project.path,"kernel.cpp")):
             replace_text(os.path.join(Project.path,"Makefile"), "kernel.cpp", "")
             replace_text(os.path.join(Project.path,"host.cpp"), "#include \"kernel.h\"", "")
-
-        add_loop_label(os.path.join(Project.path,"kernel.cpp"))
 
         cmd = "cd {}; make ".format(Project.path)
         if mode == "csim":
