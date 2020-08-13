@@ -265,7 +265,7 @@ def conv2d_nhwc(
         1)
     pad_before = [0, pad_top, pad_left, 0]
     pad_after = [0, pad_down, pad_right, 0]
-    temp = pad(Input, pad_before, pad_after, name="temp")
+    temp = pad(Input, pad_before, pad_after, name=name+"_pad")
     rc = hcl.reduce_axis(0, in_channel, name='rc')
     ry = hcl.reduce_axis(0, kernel_h, name='ry')
     rx = hcl.reduce_axis(0, kernel_w, name='rx')
@@ -330,7 +330,10 @@ def conv2d_nchw(
     # compute graph
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
-    temp = pad(Input, pad_before, pad_after, name="pad_temp")
+    if padding != [0, 0]:
+        temp = pad(Input, pad_before, pad_after, name=name+"_pad")
+    else:
+        temp = Input
     if groups > 1:
         rc = hcl.reduce_axis(0, channel / groups, name='rc')
     else:
@@ -402,7 +405,7 @@ def conv2d_hwcn(
         1)
     pad_before = [pad_top, pad_left, 0, 0]
     pad_after = [pad_down, pad_right, 0, 0]
-    temp = pad(Input, pad_before, pad_after, name="temp")
+    temp = pad(Input, pad_before, pad_after, name=name+"_pad")
     rc = hcl.reduce_axis(0, in_channel, name='rc')
     ry = hcl.reduce_axis(0, kernel_h, name='ry')
     rx = hcl.reduce_axis(0, kernel_w, name='rx')
@@ -446,7 +449,7 @@ def conv2d_nchw_old(
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
     if padding != [[0, 0], [0, 0]]:
-        Input = pad(Input, pad_before, pad_after)
+        Input = pad(Input, pad_before, pad_after, name=name+"_pad")
     rc = hcl.reduce_axis(0, in_channel)
     ry = hcl.reduce_axis(0, kernel_h)
     rx = hcl.reduce_axis(0, kernel_w)
@@ -486,7 +489,7 @@ def dense(data, weight, units=None, out_dtype=None, bias=None, name="dense"):
         ('i', batch),
         ('app_name', tvm.make.StringImm('mm'))])
     matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
-        data[i, k] * weight[j, k], axis=k), name, attrs=attrs, dtype=data.dtype)
+        data[i, k] * weight[j, k], axis=k), name=name+"_matmul", attrs=attrs, dtype=data.dtype)
     if bias is not None:
         matmul = hcl.compute(
             (batch, out_dim),
@@ -761,7 +764,7 @@ def max_pool(data, kernel, stride, padding=[[0, 0], [0, 0]], name="max_pool2d"):
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
     if padding != [[0, 0], [0, 0]]:
-        data = pad(data, pad_before, pad_after, pad_value=tvm.min_value(data.dtype))
+        data = pad(data, pad_before, pad_after, pad_value=tvm.min_value(data.dtype), name=name+"_pad")
     out_height = simplify(
         (height -
          kernel_height +
@@ -841,7 +844,7 @@ def max_pool2d_nchw(data, pooling, stride, padding, name='max_pool2d'):
         pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (pooling_h, pooling_w))
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_bottom, pad_right]
-    data = pad(data, pad_before, pad_after, pad_value=tvm.min_value(data.dtype))
+    data = pad(data, pad_before, pad_after, pad_value=tvm.min_value(data.dtype), name=name+"_pad")
     out_height = simplify(
         (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
     out_width = simplify(
@@ -896,7 +899,8 @@ def max_pool2d_nhwc(
         pad_before,
         pad_after,
         pad_value=tvm.min_value(
-            data.dtype))
+            data.dtype),
+        name=name+"_pad")
     out_height = simplify(
         (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
     out_width = simplify(
@@ -960,13 +964,15 @@ def avg_pool2d_nchw(data, pooling, stride, padding, name='avg_pool2d', dtype=Non
             padding, (pooling_h, pooling_w))
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_bottom, pad_right]
-    data = pad(
-        data,
-        pad_before,
-        pad_after,
-        pad_value=tvm.const(
-            0.0,
-            data.dtype))
+    if padding != [0, 0]:
+        data = pad(
+            data,
+            pad_before,
+            pad_after,
+            pad_value=tvm.const(
+                0.0,
+                data.dtype),
+            name=name+"_pad")
     out_height = simplify(
         (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
     out_width = simplify(
@@ -1013,7 +1019,8 @@ def avg_pool2d_nhwc(
         pad_after,
         pad_value=tvm.const(
             0.0,
-            data.dtype))
+            data.dtype),
+        name=name+"_pad")
     out_height = simplify(
         (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
     out_width = simplify(
