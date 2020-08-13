@@ -469,12 +469,14 @@ def conv2d_nchw_old(
             ('app_name', tvm.make.StringImm('cnn'))]))
 
 
-def dense(data, weight, units=None, out_dtype='', bias=None, name="dense"):
+def dense(data, weight, units=None, out_dtype=None, bias=None, name="dense"):
     assert len(
         data.shape) == 2 and len(
         weight.shape) == 2, "only support 2-dim dense"
     if bias is not None:
         assert len(bias.shape) == 1
+    if out_dtype == None:
+        out_dtype = data.dtype
     batch, in_dim = data.shape
     out_dim, _ = weight.shape
     k = hcl.reduce_axis(0, in_dim)
@@ -484,13 +486,14 @@ def dense(data, weight, units=None, out_dtype='', bias=None, name="dense"):
         ('i', batch),
         ('app_name', tvm.make.StringImm('mm'))])
     matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
-        data[i, k] * weight[j, k], axis=k), name, attrs=attrs)
+        data[i, k] * weight[j, k], axis=k), name, attrs=attrs, dtype=data.dtype)
     if bias is not None:
         matmul = hcl.compute(
             (batch, out_dim),
             lambda i, j: matmul[i, j] + bias[j],
             name=name,
-            attrs=attrs)
+            attrs=attrs,
+            dtype=out_dtype)
     return matmul
 
 
@@ -700,7 +703,8 @@ def batch_norm(
         epsilon=10**-7,
         center=1,
         scale=1,
-        name="batch_norm"):
+        name="batch_norm",
+        dtype=None):
     if axis < 0:
         axis = len(data.shape) - 1
     mred = []
@@ -727,9 +731,11 @@ def batch_norm(
     def get_axis(axis, *indices):
         indices = list(indices[0])
         return (indices[axis],)
+    if dtype == None:
+        dtype = data.dtype
     out = hcl.compute(data.shape, lambda *x: (data[x] - moving_mean[get_axis(axis, x)]) /
                     (hcl.sqrt(moving_var[get_axis(axis, x)] + epsilon)) * gamma[get_axis(axis, x)]
-                    + beta[get_axis(axis, x)], name=name, dtype=data.dtype)
+                    + beta[get_axis(axis, x)], name=name, dtype=dtype)
     return out, moving_mean, moving_var
 
 
@@ -939,9 +945,11 @@ def avg_pool2d(
     return out
 
 
-def avg_pool2d_nchw(data, pooling, stride, padding, name='avg_pool2d'):
+def avg_pool2d_nchw(data, pooling, stride, padding, name='avg_pool2d', dtype=None):
     assert len(data.shape) == 4, "only support 4-dim pooling"
     assert len(stride) == 2, "only support 2-dim stride"
+    if dtype == None:
+        dtype = data.dtype
     pooling_h, pooling_w = pooling
     stride_h, stride_w = stride
     batch, channel, height, width = data.shape
@@ -974,7 +982,7 @@ def avg_pool2d_nchw(data, pooling, stride, padding, name='avg_pool2d'):
                                      dwidth], axis=[dheight, dwidth]) /
                             (pooling_w *
                              pooling_h)),
-        name=name,
+        name=name, dtype=dtype,
         attrs=OrderedDict([
             ('out_img_w', out_width),
             ('out_img_h', out_height),
@@ -1085,7 +1093,9 @@ def transpose(data, axes=[], name="transpose"):
         attrs=OrderedDict([('app_name',tvm.make.StringImm('transpose'))]))
 
 
-def flatten(data, name="flatten"):
+def flatten(data, name="flatten", dtype=None):
+    if dtype == None:
+        dtype = data.dtype
     ishape = data.shape
     dim = 1
     for i in range(1, len(ishape)):
@@ -1100,7 +1110,7 @@ def flatten(data, name="flatten"):
         return list(reversed(index))
 
     return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
-        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('flatten'))]))
+        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('flatten'))]), dtype=dtype)
 
 
 def softmax(x, name="softmax", axis=0, frontend='keras'):
