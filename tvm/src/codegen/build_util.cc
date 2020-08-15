@@ -451,6 +451,7 @@ void GenHostHeaders(std::ofstream& stream,
 #include <cstdlib>
 #include <getopt.h>
 #include <string>
+#include <iostream>
 #include <time.h>
 #include <sys/time.h>
 #include <cassert>
@@ -528,7 +529,7 @@ void GenHostCode(TVMArgs& args,
                  std::string project) {
   int indent = 0;
   std::ofstream stream;
-  LOG(INFO) << project << " host.cpp";
+  HCL_DEBUG(2) << project << " host.cpp";
   stream.open(project + "/host.cpp");
 
   std::string include;

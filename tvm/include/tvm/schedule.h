@@ -34,6 +34,29 @@ enum AttachType : int {
   kScanUpdate = 5
 };
 
+/*! \brief Interface */
+class Interface {
+
+ public:
+  bool              valid{false};
+  ir::StorageType   storage_type;
+  ir::StreamType    stream_type;
+  int               mem_port{-1};
+  int               channel_depth{-1};
+  std::string       target_tensor;
+ 
+  bool defined() const {
+    return valid;
+  };
+
+  Interface() {};
+  Interface(ir::StorageType _storage_type, ir::StreamType _stream_type, 
+      int _mem_port, int _channel_depth, std::string _target_tensor) 
+      : valid(true), storage_type(_storage_type), stream_type(_stream_type), 
+        mem_port(_mem_port), channel_depth(_channel_depth), target_tensor(_target_tensor) {};
+ 
+};
+
 /*! \brief Stage, contains scheduling for a stage of computation. */
 class Stage : public NodeRef {
  public:
@@ -359,12 +382,6 @@ class Schedule : public NodeRef {
       IterVar axis,
       std::string name);
 
-  EXPORT void join_to(const Tensor& target,
-                      Stage source,
-                      Stage destiny,
-                      ir::StreamType stream_type,
-                      int channel_depth);
-
   EXPORT void to_stage(const Tensor& target,
                        Stage dest,
                        int arg_pos,
@@ -378,7 +395,7 @@ class Schedule : public NodeRef {
                          int channel_depth, 
                          int occur_index);
 
-  EXPORT Array<Tensor> move_to(const Tensor& target,
+  EXPORT Tensor move_to(const Tensor& target,
                         Stage parent,
                         ir::DeviceType device_type,
                         ir::StreamType stream_type,
@@ -526,8 +543,11 @@ class StageNode : public Node {
   Stage group;
   /*! \brief Number of direct child stages, only used for group stage.*/
   int num_child_stages{0};
+
   /*! \brief The device type of the schedule */
   ir::DeviceType device_type{ir::DeviceType::devHost};
+  /*! \brief Save the interface information */
+  Interface endpoint;
 
   void VisitAttrs(AttrVisitor* v) final {
     v->Visit("op", &op);
@@ -578,12 +598,15 @@ class ScheduleNode : public Node {
 
   std::unordered_map<IterVar, IterVar> extern_itervar_map;
 
+  Array<Stage> super_stages;
+
   void VisitAttrs(AttrVisitor* v) final {
     v->Visit("outputs", &outputs);
     v->Visit("stages", &stages);
     v->Visit("groups", &groups);
     v->Visit("stage_map", &stage_map);
     v->Visit("stage_buff_map", &stage_buff_map);
+    v->Visit("super_stages", &super_stages);
   }
 
   /*! \brief Initialize temp cache. */

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from ordered_set import OrderedSet
 from copy import deepcopy
 from .tvm import tensor
+from .tvm import schedule as _schedule
 from .tvm import make as _make
 from .tvm import stmt as _stmt
 from .tvm import expr as _expr
@@ -34,11 +35,16 @@ class Schedule(object):
     last_stages = OrderedSet([])
     _ids = count(0)
 
-    def __init__(self, sch, inputs, name=""):
+    def __init__(self, sch, inputs, outputs, name=""):
         self.id = next(self._ids)
         self.sch = sch
-        self.inputs = inputs
-        self.placement = dict()
+        self.inputs = inputs + outputs
+        self.outputs = outputs
+
+        self.placement   = dict()
+        self.ops_on_dev  = list()
+        self.op_map      = dict()
+
         if self.id > 0 and name == "":
             self.name = "s{}".format(self.id)
         else:
@@ -88,45 +94,10 @@ class Schedule(object):
 
             if len(name_with_prefix.split('.')) <= level or level == 0:
                 for name in names:
-                    # insert intermediate stage
-                    if name in self.placement.keys():
-                        channel, new_stage, dev = self.placement[name]
-                        op_map[channel.op.name] = channel
-                        graph.add_edge(name, channel.op.name)
-                        pos[name] = (level_count[y], y)
-
-                        op_map[new_stage.op.name] = new_stage
-                        graph.add_edge(channel.op.name, new_stage.op.name)
-                        pos[channel.op.name] = (level_count[y], y)
-
-                        graph.add_edge(new_stage.op.name, name_with_prefix)
-                        pos[new_stage.op.name] = (level_count[y], y)
-                        if plot:
-                            print(name_with_prefix, "<==", new_stage.op.name, "<==", \
-                                channel.op.name, "<==", name)
-
-                    elif name.replace("_top.", "") in self.placement.keys():
-                        channel, new_stage, dev = self.placement[name.replace("_top.", "")]
-                        op_map[channel.op.name] = channel
-                        graph.add_edge(name, channel.op.name)
-                        pos[name] = (level_count[y], y)
-
-                        op_map[new_stage.op.name] = new_stage
-                        graph.add_edge(channel.op.name, new_stage.op.name)
-                        pos[channel.op.name] = (level_count[y], y)
-
-                        graph.add_edge(new_stage.op.name, name_with_prefix)
-                        pos[new_stage.op.name] = (level_count[y], y)
-                        if plot:
-                            print(name_with_prefix, "<==", new_stage.op.name, "<==", \
-                                channel.op.name, "<==", name)
-
-                    # add children nodes to graph
-                    else:
-                        if plot:
-                            print(name_with_prefix,  " <=== ", name)
-                        graph.add_edge(name, name_with_prefix)
-                        pos[name] = (level_count[y], y)
+                    if plot:
+                        print(name_with_prefix,  " <=== ", name)
+                    graph.add_edge(name, name_with_prefix)
+                    pos[name] = (level_count[y], y)
 
                     level_count[y] += 1
                 return [name_with_prefix]
@@ -156,23 +127,31 @@ class Schedule(object):
         return graph, op_map
 
 
-    def subgraph(self, inputs, outputs):
-        assert len(inputs) > 0, "empty inputs"
-        assert len(outputs) > 0, "empty outputs"
+    def subgraph(self):
+
+        inputs, outputs = [], []
+        for k, v in self.placement.items():
+            stage, dev = v
+            if "fpga" in str(dev): inputs.append(stage)
+            else: outputs.append(stage)
+
+        if (len(inputs) == 0) or (len(outputs) == 0):
+            raise RuntimeError("Cannot find subgraph in the CDFG." + \
+                " Make sure you move the tensor with .to() before calling .subgraph()")
 
         # check availability
         graph, op_map = self.dataflow_graph()
-        inputs  = [ _.name for _ in inputs ]
-        outputs = [ _.name for _ in outputs ]
+        inputs  = [ _.op.name for _ in inputs  ]
+        outputs = [ _.op.name for _ in outputs ]
 
         # from root to parents
         stack = deepcopy(outputs)
         subgraph = list()
+
         while len(stack) > 0:
             op = stack.pop()
             if op in subgraph: continue
-            if op not in outputs:
-                subgraph.insert(0, op)
+            subgraph.insert(0, op)
             if op not in graph.nodes:
                 op = "_top." + op
             assert op in graph.nodes, \
@@ -180,9 +159,14 @@ class Schedule(object):
             for _ in graph.predecessors(op):
                 if not op in inputs:
                     stack.append(_)
-
         subgraph = OrderedSet(subgraph)
-        return subgraph, op_map
+        self.ops_on_dev = subgraph
+        self.op_map     = op_map
+
+        # Create new self.sch
+        self.sch = self.sch.normalize()
+        self.sch = _schedule.ScopePartition(self.sch) 
+        return self.sch.super_stages
 
     def duplicate(self, inputs, outputs, factor=2):
         """Extract kernel and duplicate the compute unit"""
@@ -275,7 +259,8 @@ class Schedule(object):
 
 
     def to(self, tensors, dst, src=None, axis=0,
-           mode=_expr.IO.DMA, depth=1, local_buffer=True, name=None):
+           mode=_expr.IO.DMA, depth=1, name=None):
+
         """Stream a list of Tensors to dst devices 
         Parameters
         ----------
@@ -292,61 +277,64 @@ class Schedule(object):
             Move axis-th loop body to xcel scope
 
         mode : data movement type
-            The modes of data movement (FIFO, DMA, MMIO)
-            For inter-kernel data movemnet, only FIFO is supported
+            The modes of data movement (Stream, DMA, MMIO)
+            For inter-kernel data movemnet, only Stream is supported
 
         depth : channel depth
             The streaming channel depth
 
-        local_buffer : boolean 
-            create local buffer for data on-device
-
         """
-        if mode not in [ _expr.IO.DMA, _expr.IO.FIFO ]:
-            raise APIError("Invalid channel type")
+        if mode not in [ _expr.IO.DMA, _expr.IO.Stream ]:
+            raise APIError("Only DMA and Streaming modes are supported...")
+
         rets = list()
         if not isinstance(tensors, list):
             tensors = [tensors]
+
         for tensor in tensors:
             try:
+                # move the output tensor of a stage
                 if isinstance(tensor, Stage):
                     target = tensor._op
+
                 # unpack tuple of src stage and tensor
+                # E.g. kernel.stage.B = (stage, B)
                 elif isinstance(tensor, tuple):
                     src, target = tensor
-                    # from hcl stage to tvm stage
+                    # from heterocl stage to tvm stage
                     src = self.__getitem__(src)
+
                 else: # target tensor
                     target = tensor.tensor
+
             except (AttributeError, ValueError):
                 target = tensor
 
             # convert hcl stage
-            try: dst = self[dst]
+            try: 
+                if isinstance(dst, tuple):
+                   dst, _ = dst 
+                dst = self.__getitem__(dst)
             except: pass
 
             move_to_device = False
             if src is None:
                 # move to device
-                if isinstance(dst, Device) or \
-                        isinstance(dst, DevMediaPair):
+                if isinstance(dst, Device) or isinstance(dst, DevMediaPair):
                     if axis == 0:
                         move_to_device = True
                     else: # inner-stage movement
                         assert isinstance(tensor, Stage)
-                        target = self[tensor]
+                        target = self.__getitem__(tensor)
 
                 else: # inter-stage
-                    src = self[tensor]
+                    src = self.__getitem__(tensor)
 
             # target can be stage or tensor
-            ret = self.sch.to(target, dst, src, axis, mode, depth, local_buffer)
+            ret = self.sch.to(target, dst, src, axis, mode, depth)
             # record the placement information
             if move_to_device:
-                channel, ret = ret
-                self.placement[target.name] = \
-                        (self.__getitem__(channel), \
-                         self.__getitem__(ret), dst)
+                self.placement[target.name] = (self.__getitem__(ret), dst)
 
             rets.append(ret)
 

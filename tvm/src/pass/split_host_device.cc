@@ -77,7 +77,10 @@ class IRUseDefAnalysis : public IRMutator {
   }
 
   Stmt Mutate_(const Store *op, const Stmt& s) final {
+    size_t prev = undefined_.size();
     this->HandleUse(op->buffer_var);
+    if (undefined_.size() > prev) 
+        HCL_DEBUG(2) << "Undefined Store Buffer " << s;
     return IRMutator::Mutate_(op, s);
   }
 
@@ -105,12 +108,18 @@ class IRUseDefAnalysis : public IRMutator {
   }
 
   Expr Mutate_(const Variable *op, const Expr& e) final {
+    size_t prev = undefined_.size();
     this->HandleUse(e);
+    if (undefined_.size() > prev)  
+        HCL_DEBUG(2) << "Undefined Variable Buffer " << e;
     return IRMutator::Mutate_(op, e);
   }
 
   Expr Mutate_(const Load *op, const Expr& e) final {
+    size_t prev = undefined_.size();
     this->HandleUse(op->buffer_var);
+    if (undefined_.size() > prev) 
+        HCL_DEBUG(2) << "Undefined Load Buffer " << e;
     return IRMutator::Mutate_(op, e);
   }
 
@@ -286,7 +295,7 @@ std::unordered_set<const Variable*> UnusedVars(const Stmt& stmt) {
   std::unordered_set<const Variable*> unused_vars;
   for (auto& kv : m.use_count_) {
     if (kv.second == 0) {
-      LOG(INFO) << kv.first->name_hint;
+      HCL_DEBUG(2) << kv.first->name_hint;
       unused_vars.insert(kv.first);
     }
   }
