@@ -235,6 +235,13 @@ class Stage : public NodeRef {
 
   EXPORT Stage& label(IterVar var, const std::string& loop_label);   // NOLINT(*)
 
+  /*!
+   * \brief Pipeline stage.
+   * \param var The axis to be pipelined.
+   * \return reference to self.
+   */
+  EXPORT Stage& dataflow(IterVar var); // NOLINT(*)
+
   EXPORT Stage& stencil(int burst_width, int unroll_factor, int num_iteration);   // NOLINT(*)
   /*!
    * \brief Annotate the iteration with pragma
@@ -412,6 +419,8 @@ class Schedule : public NodeRef {
 
   EXPORT Tensor partition(const Tensor& target, int dim, int factor,
                           ir::PartitionType partition_type);
+
+  EXPORT void dataflow();
 
   EXPORT void reshape(const Tensor& target, Array<Expr> new_shape);
   /*!

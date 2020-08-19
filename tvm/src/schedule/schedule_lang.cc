@@ -493,6 +493,13 @@ Stage& Stage::label(IterVar var, const std::string& loop_label) {
   std::shared_ptr<IterVarAttrNode> node = std::make_shared<IterVarAttrNode>();
   node->for_loop_annotate_keys.push_back(ir::StringImm::make("loop_label"));
   node->for_loop_annotate_values.push_back(Expr(loop_label));
+}
+
+Stage& Stage::dataflow(IterVar var) {
+  std::shared_ptr<IterVarAttrNode> node = std::make_shared<IterVarAttrNode>();
+  node->iter_type = kDataflow;
+  node->for_loop_annotate_keys.push_back(ir::StringImm::make("dataflow"));
+  node->for_loop_annotate_values.push_back(true);
   SetIterVarAttr(operator->(), var, node.get());
   return *this;
 }

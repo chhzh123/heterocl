@@ -809,6 +809,26 @@ Tensor Schedule::partition(const Tensor& target, int dim, int factor,
   return partition_tensor;
 }
 
+void Schedule::dataflow() {
+  size_t num_stage = (*this)->stages.size();
+  Stage top_stage = (*this)->stages[num_stage-1];
+  const ExternOpNode* op = top_stage->op.as<ExternOpNode>();
+  Stmt body = AttrStmt::make(
+      top_stage->op,
+      attr::dataflow_scope,
+      IntImm::make(Int(32), 1),
+      op->body);
+  top_stage->op = ExternOpNode::make(
+    op->name,
+    op->tag,
+    op->axis,
+    op->inputs,
+    op->input_placeholders,
+    op->output_placeholders,
+    body
+  );
+}
+
 // Do not support reshaping the placeholders for now
 void Schedule::reshape(const Tensor& target, Array<Expr> new_shape) {
   Stage target_stage = (*this)[target];

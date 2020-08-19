@@ -29,6 +29,17 @@ struct argInfo {
   int             channel_depth;
 };
 
+class DataflowChecker final : public IRVisitor {
+  public:
+    bool dataflow_pragma = false;
+    void Visit_(const AttrStmt* op) {
+      if (op->attr_key == attr::dataflow_scope)
+        dataflow_pragma = true;
+      else
+        this->Visit(op->body);
+    }
+};
+
 void CodeGenVivadoHLS::AddFunction(LoweredFunc f,
         str2tupleMap<std::string, Type> map_arg_type) {
   // write header files
@@ -97,6 +108,12 @@ void CodeGenVivadoHLS::AddFunction(LoweredFunc f,
   stream << ") {\n";
   int func_scope = this->BeginScope();
   range_ = CollectIterRange(f->body);
+  DataflowChecker dc;
+  dc.Visit(f->body);
+  if (dc.dataflow_pragma) {
+    this->PrintIndent();
+    this->stream << "#pragma HLS dataflow\n";
+  }
   this->PrintStmt(f->body);
   this->EndScope(func_scope);
   this->PrintIndent();
@@ -337,6 +354,9 @@ void CodeGenVivadoHLS::VisitStmt_(const For* op) {
     os << "#pragma HLS pipeline";
     if (II > 0) os << " II=" << II << "\n";
     else        os << "\n";
+  }
+  else if (op->for_type == ForType::Dataflow) {
+    os << "#pragma HLS dataflow\n";
   }
   GenForStmt(op, os.str(), false);
 }
