@@ -262,6 +262,7 @@ void CodeGenVivadoHLS::VisitStmt_(const Allocate* op) {
     else scope = "local";
 
     this->PrintIndent();
+    if (op->is_const) stream << "const "; // print const
     if (constant_size > 1) { // Transfer length one array to scalar
       if (sdsoc_mode) {
         // allocate continuous phy mem
@@ -284,6 +285,19 @@ void CodeGenVivadoHLS::VisitStmt_(const Allocate* op) {
           stream << '[';
           PrintExpr(op->extents[i], stream);
           stream << "]";
+        }
+        if (!op->init_values.empty()) {
+          stream << " = ";
+          if (constant_size == 1) PrintExpr(op->init_values[0], stream);
+          else {
+            std::vector<size_t> extents;
+            for (size_t i = 0; i < op->extents.size(); i++) {
+              const int64_t* extent = as_const_int(op->extents[i]);
+              CHECK(extent != nullptr) << "Extent of an init array cannot be a variable\n";
+              extents.push_back(*extent);
+            }
+            PrintArray(op->init_values, extents, stream, 0, 0);
+          }
         }
       }
       
