@@ -999,6 +999,50 @@ def avg_pool2d_nchw(data, pooling, stride, padding, name='avg_pool2d', dtype=Non
             ('stride_w', stride[0]),
             ('app_name', tvm.make.StringImm('avg_pool'))]))
 
+def avg_pool2d_LB(data, pooling, stride, padding, name='avg_pool2d_LB', dtype=None):
+    assert len(data.shape) == 4, "only support 4-dim pooling"
+    assert len(stride) == 2, "only support 2-dim stride"
+    if dtype == None:
+        dtype = data.dtype
+    pooling_h, pooling_w = pooling
+    stride_h, stride_w = stride
+    batch, channel, height, width = data.shape
+    if len(padding) == 4:
+        pad_top, pad_left, pad_bottom, pad_right = padding
+    else:
+        pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(
+            padding, (pooling_h, pooling_w))
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_bottom, pad_right]
+    if padding != [0, 0]:
+        data = pad(
+            data,
+            pad_before,
+            pad_after,
+            pad_value=tvm.const(
+                0.0,
+                data.dtype),
+            name=name+"_pad")
+    out_height = simplify(
+        (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
+    out_width = simplify(
+        (width - pooling_w + pad_left + pad_right) // stride_w + 1)
+    dheight = hcl.reduce_axis(0, pooling_h)
+    dwidth = hcl.reduce_axis(0, pooling_w)
+    size = pooling_w * pooling_h
+    # pooling should be equal to stride
+    LB = hcl.compute((pooling_h, width), lambda x, y: 0, name+"_LB", dtype)
+    def _pool(ii, cc, hh, ww):
+        val = hcl.scalar(0, name+"_val", dtype=dtype)
+        with hcl.for_(0, pooling_h, name=name+"_LB_i") as LB_i:
+            with hcl.for_(0, width, name=name+"_LB_j") as LB_j:
+                LB[LB_i, LB_j] = data[ii, cc, hh * pooling_h + LB_i, LB_j]
+        with hcl.for_(0, pooling_h, name=name+"_r") as r:
+            with hcl.for_(0, pooling_w, name=name+"_c") as c:
+                val.v += LB[r, ww * pooling_w + c]
+        return val.v
+    return hcl.compute((batch, channel, out_height, out_width),
+                       lambda i, c, h, w: _pool(i,c,h,w) / size, name, dtype)
 
 def avg_pool2d_nhwc(
     data, pooling, stride=[
