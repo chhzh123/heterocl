@@ -444,7 +444,7 @@ def packed_max_pool2d_LB(
     dtype = data.dtype
     LB = hcl.compute((2, width), lambda x, y: 0, name+"_LB", dtype)
     def _pool(ii, cc, hh, ww):
-        val = hcl.scalar(0, name+"_val")
+        val = hcl.scalar(0, name+"_val", dtype=dtype)
         with hcl.for_(0, 2, name=name+"_LB_i") as LB_i:
             with hcl.for_(0, width, name=name+"_LB_j") as LB_j:
                 LB[LB_i, LB_j] = data[ii, cc, hh * 2 + LB_i, LB_j]

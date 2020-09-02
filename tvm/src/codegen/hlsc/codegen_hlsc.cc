@@ -116,7 +116,7 @@ void CodeGenHLSC::GenForStmt(const For* op, std::string pragma, bool before) {
         loop_stage_name = true;
         auto label = op->annotate_values[i].as<StringImm>();
         if (label->value == "")
-          stream << vid;
+          stream << "loop_" << vid;
         else
           stream << label->value << "_" << vid;
         stream << ": ";

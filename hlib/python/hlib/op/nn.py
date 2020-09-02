@@ -1037,9 +1037,9 @@ def avg_pool2d_LB(data, pooling, stride, padding, name='avg_pool2d_LB', dtype=No
         with hcl.for_(0, pooling_h, name=name+"_LB_i") as LB_i:
             with hcl.for_(0, width, name=name+"_LB_j") as LB_j:
                 LB[LB_i, LB_j] = data[ii, cc, hh * pooling_h + LB_i, LB_j]
-        with hcl.for_(0, pooling_h, name=name+"_r") as r:
-            with hcl.for_(0, pooling_w, name=name+"_c") as c:
-                val.v += LB[r, ww * pooling_w + c]
+        with hcl.for_(0, pooling_h, name=name+"_rr") as rr:
+            with hcl.for_(0, pooling_w, name=name+"_cc") as cc:
+                val.v += LB[rr, ww * pooling_w + cc]
         return val.v
     return hcl.compute((batch, channel, out_height, out_width),
                        lambda i, c, h, w: _pool(i,c,h,w) / size, name, dtype)
