@@ -4801,7 +4801,7 @@ private:
                     break;
                 }
             }
-            if (!flag_keys) { // no annotated keys, do simplification
+            if (op->annotate_keys.size() <= 1 || !flag_keys) { // no annotated keys, do simplification
                 stmt = mutate(substitute(op->loop_var, 0, op->body));
                 return;
             }

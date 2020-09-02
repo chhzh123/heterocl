@@ -23,7 +23,7 @@ def flatten(data, name="flatten"):
         return index
 
     return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
-        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('flatten'))]),
+        name=name,
         dtype=data.dtype)
 
 def packed_flatten(data, name="packed_flatten"):
@@ -41,7 +41,7 @@ def packed_flatten(data, name="packed_flatten"):
         return list(reversed(index))
 
     return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
-        name=name,attrs=OrderedDict([('app_name',tvm.make.StringImm('packed_flatten'))]))
+        name=name)
 
 def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
     assert len(
@@ -54,30 +54,22 @@ def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
     k = hcl.reduce_axis(0, in_dim)
     var_w = np.sqrt(2. / in_dim) # predefined constant
     # var_w = 1
-    attrs = OrderedDict([
-        ('k', in_dim),
-        ('j', out_dim),
-        ('i', batch),
-        ('app_name', tvm.make.StringImm('mm'))])
     if bias is None:
         matmul = hcl.compute((batch, out_dim), lambda i, j: sum(
             tvm.all(data[i, k] == weight[j, k]), axis=k)
             * 2 - in_dim,
-            name=name+"_matmul",
-            attrs=attrs) # Data type needs to be specified!
+            name=name+"_matmul") # Data type needs to be specified!
     else:
         matmul = hcl.compute((batch, out_dim), lambda i, j: (hcl.sum(
             tvm.all(data[i, k] == weight[j, k]), axis=k, dtype=bias.dtype, name=name+"_sum")
             * 2 - in_dim) * var_w + bias[j],
             name=(name+"_matmul" if use_relu else name),
-            attrs=attrs,
             dtype=bias.dtype)
     if use_relu:
         matmul = hcl.compute(
             (batch, out_dim),
             lambda i, j: hcl.select(matmul[i, j] > 0, 1, 0),
             name=name,
-            attrs=attrs,
             dtype=qtype_bit
         )
     return matmul
@@ -102,11 +94,6 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
     rk = hcl.reduce_axis(0, in_dim, name=name+"_rk")
     var_w = np.sqrt(2. / in_dim) # predefined constant
     # var_w = 1
-    attrs = OrderedDict([
-        ('k', in_dim),
-        ('j', out_dim),
-        ('i', batch),
-        ('app_name', tvm.make.StringImm('mm'))])
     rb = hcl.reduce_axis(0, bitwidth, name=name+"_rb")
     if bias is not None:
         matmul = hcl.compute((batch, out_dim), lambda i, j:
@@ -117,7 +104,6 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
         matmul = hcl.compute((batch, out_dim), lambda i, j:
                 (in_dim * bitwidth - (matmul[i, j] << 1)) * var_w + bias[j],
                 name=name,
-                attrs=attrs,
                 dtype=bias.dtype)
     else:
         def genpack(i, j):
@@ -129,7 +115,6 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
             (batch, out_dim // bitwidth),
             genpack,
             name=name,
-            attrs=attrs,
             dtype=data.dtype
         )
     return matmul
@@ -346,16 +331,7 @@ def max_pool2d_nchw(
                                     dwidth], axis=[dheight, dwidth]) > 0,
                                     1,
                                     0),
-        name=name, dtype=qtype_bit,
-        attrs=OrderedDict([
-            ('out_img_w', out_width),
-            ('out_img_h', out_height),
-            ('in_num', channel),
-            ('kernel_h', pooling[1]),
-            ('kernel_w', pooling[0]),
-            ('stride_h', stride[1]),
-            ('stride_w', stride[0]),
-            ('app_name', tvm.make.StringImm('max_pool'))]))
+        name=name, dtype=qtype_bit)
 
 def packed_max_pool2d_nchw(
         data,
@@ -397,16 +373,7 @@ def packed_max_pool2d_nchw(
             data[i, c, h * stride_h, w * stride_w+1] |
             data[i, c, h * stride_h+1, w * stride_w] |
             data[i, c, h * stride_h+1, w * stride_w+1],
-        name=name, dtype=hcl.UInt(bitwidth),
-        attrs=OrderedDict([
-            ('out_img_w', out_width),
-            ('out_img_h', out_height),
-            ('in_num', channel),
-            ('kernel_h', pooling[1]),
-            ('kernel_w', pooling[0]),
-            ('stride_h', stride[1]),
-            ('stride_w', stride[0]),
-            ('app_name', tvm.make.StringImm('max_pool'))]))
+        name=name, dtype=hcl.UInt(bitwidth))
     if not unpack:
         return maxpool
     else:
