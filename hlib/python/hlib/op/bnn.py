@@ -11,6 +11,15 @@ qtype_bit = hcl.UInt(1)
 def if_mac(y, x, in_h, in_w, pad_top, pad_left, pad_down, pad_right):
     return tvm.all(x >= pad_left, x < in_w - pad_right, y >= pad_top, y < in_h - pad_down)
 
+def pad(data, padding=[1,1], name="pad"):
+    assert len(data.shape) == 4, "Only support 4D padding"
+    batch, channel, in_height, in_width = data.shape
+    out_height, out_width = in_height + 2 * padding[0], in_width + 2 * padding[1]
+    return hcl.compute((batch,channel,out_height,out_width),
+                lambda ii, cc, hh, ww: hcl.select(if_mac(hh,ww,out_height,out_width,padding[0],padding[1],padding[0],padding[1]),
+                data[ii, cc, hh-padding[0], ww-padding[1]],0),
+                dtype=data.dtype,name=name)
+
 def flatten(data, name="flatten"):
     ishape = data.shape
     dim = 1
@@ -243,7 +252,8 @@ def packed_conv2d_nchw(
     # compute graph
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
-    temp = pad(Input, pad_before, pad_after, name=name+"_pad")
+    # temp = pad(Input, pad_before, pad_after, name=name+"_pad")
+    temp = pad(Input, name=name+"_pad")
     pad_in_height = in_height + pad_top + pad_down
     pad_in_width = in_width + pad_left + pad_right
     rc = hcl.reduce_axis(0, in_channel, name=name+'_rc')
@@ -366,13 +376,10 @@ def packed_max_pool2d_nchw(
         (width - pooling_w + pad_left + pad_right) // stride_w + 1)
     dheight = hcl.reduce_axis(0, pooling_h)
     dwidth = hcl.reduce_axis(0, pooling_w)
+    reduce_or = hcl.reducer(0,lambda x, y: x | y, hcl.UInt(bitwidth))
     maxpool = hcl.compute(
         (batch, channel, out_height, out_width),
-        lambda i, c, h, w:
-            data[i, c, h * stride_h, w * stride_w] |
-            data[i, c, h * stride_h, w * stride_w+1] |
-            data[i, c, h * stride_h+1, w * stride_w] |
-            data[i, c, h * stride_h+1, w * stride_w+1],
+        lambda i, c, h, w: reduce_or(data[i, c, h * stride_h + dheight, w * stride_w + dwidth], axis=[dheight, dwidth]),
         name=name, dtype=hcl.UInt(bitwidth))
     if not unpack:
         return maxpool
