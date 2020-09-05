@@ -11,7 +11,7 @@ qtype_bit = hcl.UInt(1)
 def if_mac(y, x, in_h, in_w, pad_top, pad_left, pad_down, pad_right):
     return tvm.all(x >= pad_left, x < in_w - pad_right, y >= pad_top, y < in_h - pad_down)
 
-def pad(data, padding=[1,1], name="pad"):
+def pad_(data, padding=[1,1], name="pad"):
     assert len(data.shape) == 4, "Only support 4D padding"
     batch, channel, in_height, in_width = data.shape
     out_height, out_width = in_height + 2 * padding[0], in_width + 2 * padding[1]
@@ -253,7 +253,7 @@ def packed_conv2d_nchw(
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
     # temp = pad(Input, pad_before, pad_after, name=name+"_pad")
-    temp = pad(Input, name=name+"_pad")
+    temp = pad_(Input, name=name+"_pad")
     pad_in_height = in_height + pad_top + pad_down
     pad_in_width = in_width + pad_left + pad_right
     rc = hcl.reduce_axis(0, in_channel, name=name+'_rc')
