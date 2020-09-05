@@ -2,6 +2,7 @@ from ._ffi.function import register_func
 import os, subprocess, time, re, glob
 from ..report import parse_xml
 from ..devices import Project
+from .hardcode import hardcode
 debug = True
 
 def replace_text(f_name, prev, new):
@@ -206,6 +207,8 @@ def copy_and_compile(platform, mode, backend, host_only, cfg, script):
 
         with open(os.path.join(Project.path,"run.tcl"),"w") as tcl_file:
             tcl_file.write(new_tcl)
+
+        hardcode(os.path.join(Project.path,"kernel.cpp"))
         return "success"
 
     # copy sdsoc makefile
