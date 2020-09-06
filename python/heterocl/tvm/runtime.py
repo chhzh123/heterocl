@@ -281,6 +281,7 @@ def copy_and_compile(platform, mode, backend, host_only, cfg, script):
 
     elif platform == "vitis":
         env = os.environ.copy()
+        hardcode(os.path.join(Project.path,"kernel.cpp"))
         assert "XDEVICE" in os.environ, \
                "vitis platform info missing" 
         os.system("cp " + path + "vitis/* " + Project.path)
