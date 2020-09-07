@@ -120,8 +120,19 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
             out = run_process(cmd)
 
     elif platform == "vitis":
-        assert os.system("which v++ >> /dev/null") == 0, \
-            "cannot find v++ on system path"
+        try:
+            assert os.system("which v++ >> /dev/null") == 0, \
+                "cannot find v++ on system path"
+        except:
+            cmd = "cd {}; make ".format(Project.path)
+            print("Warning: Fallback! Using Vivado HLS to compile")
+            cmd += "vivado_hls"
+            print("[{}] Begin synthesizing project ...".format(
+                time.strftime("%H:%M:%S", time.gmtime())))
+            subprocess.Popen(cmd, shell=True).wait()
+            out = parse_xml(Project.path, print_flag=True)
+            return str(qor)
+
         cmd = "cd {}; ".format(Project.path)
 
         if mode == "hw_exe":
@@ -280,10 +291,31 @@ def copy_and_compile(platform, mode, backend, host_only, cfg, script):
         return "success"
 
     elif platform == "vitis":
-        env = os.environ.copy()
-        hardcode(os.path.join(Project.path,"kernel.cpp"))
-        assert "XDEVICE" in os.environ, \
-               "vitis platform info missing" 
+        try:
+            env = os.environ.copy()
+            hardcode(os.path.join(Project.path,"kernel.cpp"))
+            assert "XDEVICE" in os.environ, \
+                "vitis platform info missing" 
+        except:
+            os.system("cp " + path + "vivado/* " + Project.path)
+            os.system("cp " + path + "harness.mk " + Project.path)
+            removed_mode = ["csim","cosim","impl"]
+            new_tcl = ""
+            with open(os.path.join(Project.path,"run.tcl"),"r") as tcl_file:
+                for line in tcl_file:
+                    if ("csim_design" in line and "csim" in removed_mode) \
+                    or ("csynth_design" in line and "csyn" in removed_mode) \
+                    or ("cosim_design" in line and "cosim" in removed_mode) \
+                    or ("export_design" in line and "impl" in removed_mode):
+                        new_tcl += "#" + line
+                    else:
+                        new_tcl += line
+
+            with open(os.path.join(Project.path,"run.tcl"),"w") as tcl_file:
+                tcl_file.write(new_tcl)
+
+            return "success"
+
         os.system("cp " + path + "vitis/* " + Project.path)
         cmd = "cd {}; make clean; ".format(Project.path)
 
