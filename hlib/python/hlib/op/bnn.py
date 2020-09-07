@@ -188,7 +188,7 @@ def conv2d_nchw(
             (batch, out_channel, out_height, out_width),
             lambda nn, ff, yy, xx: hcl.sum(
                 hcl.select(
-                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                    if_mac(yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
                     ((1 - temp[nn, rc, yy * stride_h + ry * dilation_h,
                                 xx * stride_w + rx * dilation_w] ^
                             Filter[ff, rc, ry, rx])
@@ -202,7 +202,7 @@ def conv2d_nchw(
             (batch, out_channel, out_height, out_width),
             lambda nn, ff, yy, xx: hcl.sum(
                 hcl.select(
-                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                    if_mac(yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
                     ((1 - temp[nn, 0, yy * stride_h + ry * dilation_h,
                                 xx * stride_w + rx * dilation_w] ^
                             Filter[ff, 0, ry, rx])
@@ -240,7 +240,8 @@ def packed_conv2d_nchw(
     if bitwidth == None:
         bitwidth = int(Input.dtype.split("int")[-1])
     batch, in_channel, in_height, in_width = Input.shape
-    num_filter, _, kernel_h, kernel_w = Filter.shape
+    num_filter, filter_channel, kernel_h, kernel_w = Filter.shape
+    assert in_channel == filter_channel
     # compute the output shape
     dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
     dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
@@ -264,23 +265,27 @@ def packed_conv2d_nchw(
     ry = hcl.reduce_axis(0, kernel_h, name=name+'_ry')
     rx = hcl.reduce_axis(0, kernel_w, name=name+'_rx')
     rb = hcl.reduce_axis(0, bitwidth, name=name+'_rb')
-    assert stride_h == 1 and stride_w == 1
+    # assert stride_h == 1 and stride_w == 1
     assert dilation_h == 1 and dilation_w == 1
     kernel_size = kernel_h * kernel_w
     if bitwidth == 1:
         const = 1
+    elif bitwidth == 8:
+        const = 0xff
     elif bitwidth == 16:
         const = 0xffff
     elif bitwidth == 32:
         const = 0xffffffff
+    elif bitwidth == 64:
+        const = 0xffffffffffffffff
     if threshold == None:
         rc_ = rc if in_channel != 1 else 0
         out = hcl.compute(
             (batch, out_channel, out_height, out_width),
             lambda nn, ff, yy, xx: hcl.sum(
                 hcl.select(
-                    if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                    ((const - (temp[nn, rc_, yy + ry, xx + rx] ^ Filter[ff, rc_, ry, rx]))[rb] << 1) - 1,
+                    if_mac(yy*stride_h+ry, xx*stride_w+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                    ((const - (temp[nn, rc_, yy * stride_h + ry, xx * stride_w + rx] ^ Filter[ff, rc_, ry, rx]))[rb] << 1) - 1,
                     0),
                 axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
                 name=name,
@@ -293,8 +298,8 @@ def packed_conv2d_nchw(
             with hcl.for_(0, bitwidth) as k:
                 out[0][(k+1) : k] = hcl.select(
                     hcl.sum(hcl.select(
-                        if_mac(yy+ry, xx+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                        ((const - (temp[nn, rc_, yy + ry, xx + rx] ^ Filter[ff*bitwidth+k, rc_, ry, rx]))[rb] << 1) - 1,
+                        if_mac(yy*stride_h+ry, xx*stride_w+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                        ((const - (temp[nn, rc_, yy * stride_h + ry, xx * stride_w + rx] ^ Filter[ff*bitwidth+k, rc_, ry, rx]))[rb] << 1) - 1,
                     0), axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum")
                     > threshold[ff*bitwidth+k, yy, xx],
                     1, 0)
