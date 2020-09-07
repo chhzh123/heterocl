@@ -11,14 +11,16 @@ qtype_bit = hcl.UInt(1)
 def if_mac(y, x, in_h, in_w, pad_top, pad_left, pad_down, pad_right):
     return tvm.all(x >= pad_left, x < in_w - pad_right, y >= pad_top, y < in_h - pad_down)
 
-def pad_(data, padding=[1,1], name="pad"):
+def pad_(data, padding=[1,1], name="pad", dtype=None):
     assert len(data.shape) == 4, "Only support 4D padding"
+    if dtype == None:
+        dtype = data.dtype
     batch, channel, in_height, in_width = data.shape
     out_height, out_width = in_height + 2 * padding[0], in_width + 2 * padding[1]
     return hcl.compute((batch,channel,out_height,out_width),
                 lambda ii, cc, hh, ww: hcl.select(if_mac(hh,ww,out_height,out_width,padding[0],padding[1],padding[0],padding[1]),
                 data[ii, cc, hh-padding[0], ww-padding[1]],0),
-                dtype=data.dtype,name=name)
+                dtype=dtype,name=name)
 
 def flatten(data, name="flatten"):
     ishape = data.shape
@@ -90,7 +92,7 @@ def _popcount(num,bitwidth,name="popcnt"):
         out.v += num[i]
     return out.v
 
-def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_dense"):
+def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_dense", dtype=None):
     assert len(
         data.shape) == 2 and len(
         weight.shape) == 2, "only support 2-dim dense"
@@ -113,7 +115,7 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
         matmul = hcl.compute((batch, out_dim), lambda i, j:
                 (in_dim * bitwidth - (matmul[i, j] << 1)) * var_w + bias[j],
                 name=name,
-                dtype=bias.dtype)
+                dtype=bias.dtype if dtype==None else dtype)
     else:
         def genpack(i, j):
             out = hcl.scalar(0, name=name+"_pack", dtype=data.dtype)
@@ -124,7 +126,7 @@ def packed_dense(data, weight, bias=None, use_relu=False, name="packed_binary_de
             (batch, out_dim // bitwidth),
             genpack,
             name=name,
-            dtype=data.dtype
+            dtype=data.dtype if dtype==None else dtype
         )
     return matmul
 
@@ -219,6 +221,7 @@ def packed_conv2d_nchw(
         dilation=[1, 1],
         out_dtype=None,
         threshold=None,
+        bitwidth=None,
         name='packed_binary_conv2d'):
     if out_dtype is None or out_dtype == '':
         out_dtype = hcl.Int()
@@ -234,7 +237,8 @@ def packed_conv2d_nchw(
     else:
         dilation_h, dilation_w = dilation
 
-    bitwidth = int(Input.dtype.split("int")[-1])
+    if bitwidth == None:
+        bitwidth = int(Input.dtype.split("int")[-1])
     batch, in_channel, in_height, in_width = Input.shape
     num_filter, _, kernel_h, kernel_w = Filter.shape
     # compute the output shape
@@ -253,7 +257,7 @@ def packed_conv2d_nchw(
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
     # temp = pad(Input, pad_before, pad_after, name=name+"_pad")
-    temp = pad_(Input, name=name+"_pad")
+    temp = pad_(Input, name=name+"_pad", dtype=hcl.UInt(bitwidth))
     pad_in_height = in_height + pad_top + pad_down
     pad_in_width = in_width + pad_left + pad_right
     rc = hcl.reduce_axis(0, in_channel, name=name+'_rc')
