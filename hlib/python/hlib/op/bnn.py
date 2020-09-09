@@ -22,6 +22,17 @@ def pad_(data, padding=[1,1], name="pad", dtype=None):
                 data[ii, cc, hh-padding[0], ww-padding[1]],0),
                 dtype=dtype,name=name)
 
+def pad_nhwc(data, padding=[1,1], name="pad", dtype=None):
+    assert len(data.shape) == 4, "Only support 4D padding"
+    if dtype == None:
+        dtype = data.dtype
+    batch, in_height, in_width, channel = data.shape
+    out_height, out_width = in_height + 2 * padding[0], in_width + 2 * padding[1]
+    return hcl.compute((batch,out_height,out_width,channel),
+                lambda ii, hh, ww, cc: hcl.select(if_mac(hh,ww,out_height,out_width,padding[0],padding[1],padding[0],padding[1]),
+                data[ii, hh-padding[0], ww-padding[1], cc],0),
+                dtype=dtype,name=name)
+
 def flatten(data, name="flatten"):
     ishape = data.shape
     dim = 1
@@ -52,6 +63,12 @@ def packed_flatten(data, name="packed_flatten"):
         return list(reversed(index))
 
     return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
+        name=name, dtype=data.dtype)
+
+def packed_flatten_nhwc(data, name="packed_flatten"):
+    batch, in_height, in_width, channel = data.shape
+    out_shape = (batch, in_height * in_width * channel)
+    return hcl.compute(out_shape, lambda i, j: data[i, j / (in_width * channel) % in_height, j / channel % in_width, j % channel],
         name=name)
 
 def dense(data, weight, bias=None, use_relu=False, name="binary_dense"):
@@ -308,6 +325,82 @@ def packed_conv2d_nchw(
                             genpack, name=name, dtype=hcl.UInt(bitwidth))
     return out
 
+def packed_conv2d_nhwc(
+        Input,
+        Filter,
+        strides=[1, 1],
+        padding=[0, 0],
+        dilation=[1, 1],
+        out_dtype=None,
+        bitwidth=None,
+        name='packed_binary_conv2d'):
+    if out_dtype is None or out_dtype == '':
+        out_dtype = hcl.Int()
+    assert isinstance(strides, int) or len(strides) == 2
+    assert isinstance(dilation, int) or len(dilation) == 2
+    if isinstance(strides, int):
+        stride_h = stride_w = strides
+    else:
+        stride_h, stride_w = strides
+
+    if isinstance(dilation, int):
+        dilation_h = dilation_w = dilation
+    else:
+        dilation_h, dilation_w = dilation
+
+    if bitwidth == None:
+        bitwidth = int(Input.dtype.split("int")[-1])
+    batch, in_height, in_width, in_channel = Input.shape
+    num_filter, kernel_h, kernel_w, filter_channel = Filter.shape
+    assert in_channel == filter_channel
+    # compute the output shape
+    dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+    dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (dilated_kernel_h, dilated_kernel_w))
+    out_channel = num_filter
+    out_height = simplify(
+        (in_height - dilated_kernel_h + pad_top + pad_down) //
+        stride_h + 1)
+    out_width = simplify(
+        (in_width - dilated_kernel_w + pad_left + pad_right) //
+        stride_w + 1)
+    # compute graph
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_down, pad_right]
+    temp = pad_nhwc(Input, name=name+"_pad", dtype=hcl.UInt(bitwidth))
+    pad_in_height = in_height + pad_top + pad_down
+    pad_in_width = in_width + pad_left + pad_right
+    rc = hcl.reduce_axis(0, in_channel, name=name+'_rc')
+    ry = hcl.reduce_axis(0, kernel_h, name=name+'_ry')
+    rx = hcl.reduce_axis(0, kernel_w, name=name+'_rx')
+    rb = hcl.reduce_axis(0, bitwidth, name=name+'_rb')
+    # assert stride_h == 1 and stride_w == 1
+    assert dilation_h == 1 and dilation_w == 1
+    kernel_size = kernel_h * kernel_w
+    if bitwidth == 1:
+        const = 1
+    elif bitwidth == 8:
+        const = 0xff
+    elif bitwidth == 16:
+        const = 0xffff
+    elif bitwidth == 32:
+        const = 0xffffffff
+    elif bitwidth == 64:
+        const = 0xffffffffffffffff
+    rc_ = rc if in_channel != 1 else 0
+    out = hcl.compute(
+        (batch, out_height, out_width, out_channel),
+        lambda nn, yy, xx, ff: hcl.sum(
+            hcl.select(
+                if_mac(yy*stride_h+ry, xx*stride_w+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                ((const - (temp[nn, yy * stride_h + ry, xx * stride_w + rx, rc_] ^ Filter[ff, ry, rx, rc_]))[rb] << 1) - 1,
+                0),
+            axis=[ry, rx, rc, rb], dtype=out_dtype, name=name+"_sum"),
+            name=name,
+            dtype=out_dtype)
+    return out
+
 def max_pool2d_nchw(
         data,
         pooling=[1, 1],
@@ -399,6 +492,47 @@ def packed_max_pool2d_nchw(
             name=name+"_unpack",
             dtype=qtype_bit)
 
+def packed_max_pool2d_nhwc(
+        data,
+        pooling=[1, 1],
+        stride=[1, 1],
+        padding=[0, 0],
+        layout='NCHW',
+        name='packed_binary_max_pool2d',
+        unpack=True):
+    assert len(data.shape) == 4, "only support 4-dim pooling"
+    assert len(stride) == 2, "only support 2-dim stride"
+    assert pooling == [2,2], "only support [2,2] pooling now"
+    assert padding == [0,0], "only support [0,0] padding now"
+    max = hcl.reducer(
+        hcl.min_value(data.dtype),
+        lambda x, y: tvm.make.Max(x, y),
+        data.dtype)
+    pooling_h, pooling_w = pooling
+    stride_h, stride_w = stride
+    batch, height, width, channel = data.shape
+    bitwidth = int(data.dtype.split("int")[-1])
+    if len(padding) == 4:
+        pad_top, pad_left, pad_bottom, pad_right = padding
+    else:
+        pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (pooling_h, pooling_w))
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_bottom, pad_right]
+    if (pad_top,pad_left,pad_bottom,pad_right) != (0,0,0,0):
+        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype),name=name+"_pad")
+    out_height = simplify(
+        (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
+    out_width = simplify(
+        (width - pooling_w + pad_left + pad_right) // stride_w + 1)
+    dheight = hcl.reduce_axis(0, pooling_h)
+    dwidth = hcl.reduce_axis(0, pooling_w)
+    reduce_or = hcl.reducer(0,lambda x, y: x | y, hcl.UInt(bitwidth))
+    maxpool = hcl.compute(
+        (batch, out_height, out_width, channel),
+        lambda i, h, w, c: reduce_or(data[i, h * stride_h + dheight, w * stride_w + dwidth, c], axis=[dheight, dwidth]),
+        name=name, dtype=hcl.UInt(bitwidth))
+    return maxpool
+
 def packed_max_pool2d_LB(
         data,
         pooling=[1, 1],
@@ -437,6 +571,46 @@ def packed_max_pool2d_LB(
         return val.v
     return hcl.compute((batch, channel, out_height, out_width),
                        lambda i, c, h, w: _pool(i,c,h,w), name, dtype)
+
+def packed_max_pool2d_nhwc_LB(
+        data,
+        pooling=[1, 1],
+        stride=[1, 1],
+        padding=[0, 0],
+        name='packed_binary_max_pool2d_LB',):
+    assert len(data.shape) == 4, "only support 4-dim pooling"
+    assert len(stride) == 2, "only support 2-dim stride"
+    assert pooling == [2,2], "only support [2,2] pooling now"
+    assert padding == [0,0], "only support [0,0] padding now"
+    pooling_h, pooling_w = pooling
+    stride_h, stride_w = stride
+    batch, height, width, channel = data.shape
+    bitwidth = int(data.dtype.split("int")[-1])
+    if len(padding) == 4:
+        pad_top, pad_left, pad_bottom, pad_right = padding
+    else:
+        pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (pooling_h, pooling_w))
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_bottom, pad_right]
+    if (pad_top,pad_left,pad_bottom,pad_right) != (0,0,0,0):
+        data = pad(data, pad_before, pad_after, pad_value=hcl.min_value(data.dtype),name=name+"_pad")
+    out_height = simplify(
+        (height - pooling_h + pad_top + pad_bottom) // stride_h + 1)
+    out_width = simplify(
+        (width - pooling_w + pad_left + pad_right) // stride_w + 1)
+    dtype = data.dtype
+    LB = hcl.compute((2, width), lambda x, y: 0, name+"_LB", dtype)
+    def _pool(ii, hh, ww, cc):
+        val = hcl.scalar(0, name+"_val", dtype=dtype)
+        with hcl.for_(0, 2, name=name+"_LB_i") as LB_i:
+            with hcl.for_(0, width, name=name+"_LB_j") as LB_j:
+                LB[LB_i, LB_j] = data[ii, hh * 2 + LB_i, LB_j, cc]
+        with hcl.for_(0, 2, name=name+"_r") as r:
+            with hcl.for_(0, 2, name=name+"_c") as c:
+                val.v |= LB[r, ww * 2 + c]
+        return val.v
+    return hcl.compute((batch, out_height, out_width, channel),
+                       lambda i, h, w, c: _pool(i,h,w,c), name, dtype)
 
 def batch_norm(
         data,
@@ -507,4 +681,18 @@ def packed_batch_norm_threshold(
             out[0][(k+1) : k] = hcl.select(data[i, c*bitwidth+k, h, w] > threshold[c*bitwidth+k, h, w], 1, 0)
         return out[0]
     return hcl.compute((batch, channel//bitwidth, out_height, out_width),
+                        genpack, name=name, dtype=hcl.UInt(bitwidth))
+
+def packed_batch_norm_threshold_nhwc(
+        data,
+        threshold,
+        name="packed_batch_norm_threshold"):
+    batch, out_height, out_width, channel = data.shape
+    bitwidth = channel # pack channels
+    def genpack(i, h, w, c):
+        out = hcl.scalar(0, name=name+"_pack", dtype=hcl.UInt(bitwidth))
+        with hcl.for_(0, bitwidth) as k:
+            out[0][(k+1) : k] = hcl.select(data[i, h, w, c*bitwidth+k] > threshold[h, w, c*bitwidth+k], 1, 0)
+        return out[0]
+    return hcl.compute((batch, out_height, out_width, channel//bitwidth),
                         genpack, name=name, dtype=hcl.UInt(bitwidth))
