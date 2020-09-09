@@ -63,7 +63,7 @@ def packed_flatten(data, name="packed_flatten"):
         return list(reversed(index))
 
     return hcl.compute(oshape, lambda i,j: data[tuple([i] + unwrap(j,ishape[1:]))],
-        name=name, dtype=data.dtype)
+        name=name)
 
 def packed_flatten_nhwc(data, name="packed_flatten"):
     batch, in_height, in_width, channel = data.shape
@@ -239,6 +239,7 @@ def packed_conv2d_nchw(
         out_dtype=None,
         threshold=None,
         bitwidth=None,
+        mac=True,
         name='packed_binary_conv2d'):
     if out_dtype is None or out_dtype == '':
         out_dtype = hcl.Int()
@@ -297,14 +298,24 @@ def packed_conv2d_nchw(
         const = 0xffffffffffffffff
     if threshold == None:
         rc_ = rc if in_channel != 1 else 0
-        out = hcl.compute(
-            (batch, out_channel, out_height, out_width),
-            lambda nn, ff, yy, xx: hcl.sum(
-                hcl.select(
-                    if_mac(yy*stride_h+ry, xx*stride_w+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
-                    ((const - (temp[nn, rc_, yy * stride_h + ry, xx * stride_w + rx] ^ Filter[ff, rc_, ry, rx]))[rb] << 1) - 1,
-                    0),
-                axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
+        if mac:
+            out = hcl.compute(
+                (batch, out_channel, out_height, out_width),
+                lambda nn, ff, yy, xx: hcl.sum(
+                    hcl.select(
+                        if_mac(yy*stride_h+ry, xx*stride_w+rx, pad_in_height, pad_in_width, pad_top, pad_left, pad_down, pad_right), # neglect padding pixels in mac
+                        ((const - (temp[nn, rc_, yy * stride_h + ry, xx * stride_w + rx] ^ Filter[ff, rc_, ry, rx]))[rb] << 1) - 1,
+                        0),
+                    axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum"),
+                name=name,
+                dtype=out_dtype)
+        else:
+            out = hcl.compute(
+                (batch, out_channel, out_height, out_width),
+                lambda nn, ff, yy, xx: kernel_size * bitwidth * in_channel - (
+                    hcl.sum(
+                        (temp[nn, rc_, yy * stride_h + ry, xx * stride_w + rx] ^ Filter[ff, rc_, ry, rx])[rb],
+                    axis=[rc, ry, rx, rb], dtype=out_dtype, name=name+"_sum") << 1),
                 name=name,
                 dtype=out_dtype)
     else:
