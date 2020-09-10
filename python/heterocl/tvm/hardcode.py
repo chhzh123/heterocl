@@ -3,6 +3,7 @@ import os
 def hardcode(filename):
     code = open(filename,"r").readlines()
     new_code, const = move_const(code)
+    new_code = move_pipeline_inward(new_code)
     with open(filename,"w") as outfile:
         outfile.write(new_code)
     with open(os.path.join("/".join(filename.split("/")[:-1]),"const.h"),"w") as const_file:
@@ -19,3 +20,14 @@ def move_const(code):
             res.append(line)
     res.insert(11,'#include "const.h"\n\n')
     return "".join(res), "".join(const)
+
+def move_pipeline_inward(code):
+    res = []
+    idx = []
+    for i,line in enumerate(code.split("\n")):
+        if "conv1_ff" in line or "conv2_ff" in line:
+            idx.append(i)
+        res.append(line)
+    for i in idx:
+        res = res[:i] + [res[i+1]] + [res[i]] + res[i+2:]
+    return "\n".join(res)
