@@ -12,7 +12,7 @@ from .tvm import expr as _expr
 from .tvm import api as tvm_api
 from .tvm import _api_internal
 from .tvm._api_internal import _ExternOp
-from .debug import DSLError, APIError
+from .debug import DSLError, APIError, HCLError
 from . import util
 from .devices import Device, DevMediaPair
 from itertools import count
@@ -42,6 +42,8 @@ class Schedule(object):
         self.outputs = outputs
 
         self.placement   = dict()
+        self.stream_chs  = dict()
+        self.partitioned_arr   = dict()
         self.ops_on_dev  = list()
         self.op_map      = dict()
 
@@ -136,7 +138,7 @@ class Schedule(object):
             else: outputs.append(stage)
 
         if (len(inputs) == 0) or (len(outputs) == 0):
-            raise RuntimeError("Cannot find subgraph in the CDFG." + \
+            raise HCLError("Cannot find subgraph in the CDFG." + \
                 " Make sure you move the tensor with .to() before calling .subgraph()")
 
         # check availability
@@ -259,7 +261,7 @@ class Schedule(object):
 
 
     def to(self, tensors, dst, src=None, axis=0,
-           mode=_expr.IO.DMA, depth=1, name=None):
+           mode=_expr.IO.DMA, depth=1, burst=False, burst_len=-1, name=None):
 
         """Stream a list of Tensors to dst devices 
         Parameters
@@ -326,12 +328,34 @@ class Schedule(object):
                     else: # inner-stage movement
                         assert isinstance(tensor, Stage)
                         target = self.__getitem__(tensor)
+                    # burst_len == -1 means burst is diabled 
+                    if burst == True:
+                        if burst_len < 0: burst_len = 0
+                    else:
+                        assert burst_len == -1, "The burst mode must be " + \
+                            "before setting the burst length..."
 
                 else: # inter-stage
                     src = self.__getitem__(tensor)
 
+            # inter-stage data movement
+            if not (isinstance(dst, Device) or isinstance(dst, DevMediaPair)):
+                # target tensor to its destination stage
+                dests = set()
+                if target.name in self.stream_chs.keys():
+                    dests = self.stream_chs[target.name]
+                size = len(dests)
+                t = (src.op.name, dst.op.name)
+                dests.add(t)
+                if size == len(dests):
+                    print("[ Warning ] " + 
+                        "the tensor {} has been streamed to stage {}... Ignored"
+                        .format(target.name, dst.op.name))
+                    continue
+                self.stream_chs[target.name] = dests
+
             # target can be stage or tensor
-            ret = self.sch.to(target, dst, src, axis, mode, depth)
+            ret = self.sch.to(target, dst, src, axis, mode, depth, burst_len)
             # record the placement information
             if move_to_device:
                 self.placement[target.name] = (self.__getitem__(ret), dst)
@@ -382,7 +406,14 @@ class Schedule(object):
                 target = target._op
             except AttributeError:
                 pass
-        return self.sch.partition(target, partition_type, dim, factor)
+        name = target.name + ".partitioned" 
+        if name in self.partitioned_arr.keys():
+            num = self.partitioned_arr[name]
+            self.partitioned_arr[name] = num + 1
+            name += ".n{}".format(num)
+        else:
+            self.partitioned_arr[name] = 1
+        return self.sch.partition(target, partition_type, dim, factor, name)
 
     def reshape(self, target, shape):
         """Reshape a Tensor to a specified new shape
@@ -495,6 +526,11 @@ class Stage(object):
         self.for_level = 0
         self.for_ID = 0
         self.substages = []
+        # Attributes for ExternModule
+        self.inputs = []
+        self.ports  = []
+        self.source = []
+        self.command  = []
         # Attributes for cross-stage relation
         self.input_stages = set([])
         self.lhs_tensors = set([])

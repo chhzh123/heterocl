@@ -534,7 +534,7 @@ void GenHostCode(TVMArgs& args,
                  std::string project) {
   int indent = 0;
   std::ofstream stream;
-  HCL_DEBUG(2) << project << " host.cpp";
+  HCL_DEBUG_LEVEL(2) << project << " host.cpp";
   stream.open(project + "/host.cpp");
 
   std::string include;
@@ -545,7 +545,7 @@ void GenHostCode(TVMArgs& args,
 
   stream << "int main(int argc, char ** argv) {\n";
   indent += 2;
-  stream << "  std::cout << \" Initialize shared memory...\";\n";
+  stream << "  std::cout << \" Initialize shared memory...\\n\";\n";
 
   int cnt = 0; // label the constant value
   for (int i = 0; i < args.size(); i++) {
@@ -564,9 +564,16 @@ void GenHostCode(TVMArgs& args,
       auto arg_name = arg_names[i];
       stream << arg_name;
 
-      if (platform == "vivado_hls") {
+      if (platform == "vivado_hls" || platform == "vitis") {
         stream << " = new " 
                << Type2ByteVHLS(arg_types[i]);
+        if (platform == "vitis") {
+            int bits = arg_types[i].bits;
+            CHECK(bits % 8 == 0) 
+                << "[ Error ] Vitis requires the input arg of bitwidth "
+                << "to be 8's multiple. The current input width is " 
+                << bits << "...\n";
+        }
       } else {
         stream << " = new " 
                << Type2Byte(arg_types[i]);
@@ -607,7 +614,7 @@ void GenHostCode(TVMArgs& args,
     stream << "\n";
   }
 
-  stream << "  std::cout << \" Initialize RTE...\";\n";
+  stream << "  std::cout << \" Initialize RTE...\\n\";\n";
   if (!kernel_is_empty) {
     if (platform == "sdaccel" || platform == "vitis") {
       stream << R"(

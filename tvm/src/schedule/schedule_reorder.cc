@@ -33,6 +33,7 @@ struct DevScope {
     StreamType    stream_type;
     int           mem_port{-1};
     int           channel_depth{-1}; 
+    int           burst_len{-1}; 
     string        target_tensor;
 };
 
@@ -69,7 +70,7 @@ class AttachingStagesUpdater final : public IRVisitor {
             CHECK(curr_stage_name == input_stage_name);
             string loop_level = (for_loop_level > 0) ? 
                 " (loop level " + std::to_string(for_loop_level) + ")" : "";
-            HCL_DEBUG(2) << "Stage " << child_stage_name << " attaching to "
+            HCL_DEBUG_LEVEL(2) << "Stage " << child_stage_name << " attaching to "
                 << curr_stage_name << loop_level << "...";
 
             // Create a BB entry for current stage
@@ -153,16 +154,16 @@ Stmt AttachScopeReorder(
 
   CHECK(stage_to_attach_children.count("_top"));
   auto second_level_stages = stage_to_attach_children["_top"];
-  HCL_DEBUG(2) << "============== Top stage children stages before =============";
+  HCL_DEBUG_LEVEL(2) << "============== Top stage children stages before =============";
   for (auto& stage_name : second_level_stages) {
-    HCL_DEBUG(2) << stage_name.name;
+    HCL_DEBUG_LEVEL(2) << stage_name.name;
   }
 
   // Insert the non-placeholder stages until 
   // hitting the threshold index (Since placeholder op 
   // does not attach to and parent stage). 
   vector<Stmt> stack;
-  HCL_DEBUG(2) << "============== Top stage children stages after .to() =============";
+  HCL_DEBUG_LEVEL(2) << "============== Top stage children stages after .to() =============";
   int current_index = 0;
   bool aggregated_ops_inserted = false;
   for (auto& op : non_subgraph_ops) { 
@@ -174,7 +175,7 @@ Stmt AttachScopeReorder(
       // Notice that placeholder stage does not have attaching point
       CHECK(stage_to_attach_parent.count(op->name)) << op->name;
       if (stage_to_attach_parent[op->name] != "_top") {
-        HCL_DEBUG(2) << "Stage " << op->name << " already has an attaching point...";
+        HCL_DEBUG_LEVEL(2) << "Stage " << op->name << " already has an attaching point...";
         continue;
       }
 
@@ -184,7 +185,7 @@ Stmt AttachScopeReorder(
         for (auto& m_op : merged_ops) {
           auto m_extern_op = m_op.as<ExternOpNode>();
           Buffer m_buf = m_extern_op->output_placeholders[0];
-          HCL_DEBUG(2) << m_buf->data;
+          HCL_DEBUG_LEVEL(2) << m_buf->data;
           Stmt s = AttrStmt::make(VarExpr(m_buf.node_), 
               attr::attach_scope, StringImm::make("_top"), no_op);
           stack.push_back(s);
@@ -192,7 +193,7 @@ Stmt AttachScopeReorder(
       }
 
       Buffer buf = extern_op->output_placeholders[0];
-      HCL_DEBUG(2) << buf->data;
+      HCL_DEBUG_LEVEL(2) << buf->data;
       Stmt s = AttrStmt::make(VarExpr(buf.node_), 
           attr::attach_scope, StringImm::make("_top"), no_op);
       stack.push_back(s);
@@ -204,11 +205,11 @@ Stmt AttachScopeReorder(
   // If there is no other ExternOp stage after aggregated op
   if (!aggregated_ops_inserted) {
      CHECK(current_index == insert_point);
-     HCL_DEBUG(2) << "Inserting aggregated ops at the end...";
+     HCL_DEBUG_LEVEL(2) << "Inserting aggregated ops at the end...";
      for (auto& m_op : merged_ops) {
        auto m_extern_op = m_op.as<ExternOpNode>();
        Buffer m_buf = m_extern_op->output_placeholders[0];
-       HCL_DEBUG(2) << m_buf->data;
+       HCL_DEBUG_LEVEL(2) << m_buf->data;
        Stmt s = AttrStmt::make(VarExpr(m_buf.node_), 
            attr::attach_scope, StringImm::make("_top"), no_op);
        stack.push_back(s);
@@ -254,13 +255,13 @@ void SubStageOpReorder(vector<Operation>& subgraph_ops,
     unordered_map<string, vector<string> > stage_to_substage_on_dev, 
     unordered_map<string, vector<BasicBlock> >& stage_to_attach_children) {
 
-    HCL_DEBUG(2) << "Reordering the op array if necessary...";
+    HCL_DEBUG_LEVEL(2) << "Reordering the op array if necessary...";
     for (auto& kv : stage_to_substage_on_dev) {
         string super_stage_name = kv.first;
         CHECK(stage_to_attach_children.count(super_stage_name));
         if (stage_to_attach_children[super_stage_name].size() == kv.second.size()) {
             // These super stage should be inserted right before the 
-            HCL_DEBUG(2) << "Found super stage " << super_stage_name 
+            HCL_DEBUG_LEVEL(2) << "Found super stage " << super_stage_name 
                 << " fully offloaded to device scope. "
                 << "Remove it from the non-subgraph op array...";
             for (unsigned int i = 0; i < non_subgraph_ops.size(); i++) {
@@ -286,16 +287,17 @@ vector<Operation> ExtractSubGraph(
     vector<Operation>& merged_ops,
     vector<Operation>& non_subgraph_ops,
     unordered_map<string, string>& stage_to_attach_parent,
-    unordered_map<string, vector<BasicBlock> >& stage_to_attach_children) {
+    unordered_map<string, vector<BasicBlock> >& stage_to_attach_children,
+    bool &schedule_roll_back) {
    
   // Debug: print the read graph
   if (debug) {
-    HCL_DEBUG(2) << "------------ Read Graph -------------";
+    HCL_DEBUG_LEVEL(2) << "------------ Read Graph -------------";
     for (auto& kv : g) {
-      HCL_DEBUG(2) << "------------";
-      HCL_DEBUG(2) << "Stage " << kv.first << " reads from ";
+      HCL_DEBUG_LEVEL(2) << "------------";
+      HCL_DEBUG_LEVEL(2) << "Stage " << kv.first << " reads from ";
       for (auto& t : kv.second) 
-        HCL_DEBUG(2) << "    " << t->op;
+        HCL_DEBUG_LEVEL(2) << "    " << t->op;
     }
   }
 
@@ -305,7 +307,7 @@ vector<Operation> ExtractSubGraph(
 
   // Set up the search boundary 
   for (auto op : boundary) {
-    HCL_DEBUG(2) << "Insert boundary op " << op->name << "...";
+    HCL_DEBUG_LEVEL(2) << "Insert boundary op " << op->name << "...";
     workset.insert(workset.begin(), op);
   }
 
@@ -328,7 +330,7 @@ vector<Operation> ExtractSubGraph(
     for (Operation v : ancestors) { 
       auto it = std::find(workset.begin(), workset.end(), v);
       if (it != workset.end()) {
-        HCL_DEBUG(2) << "Identify input tensor " << v->name 
+        HCL_DEBUG_LEVEL(2) << "Identify input tensor " << v->name 
             << " of root tensor " << op->name;
         workset.erase(it);
         input.push_back(v.output(0));
@@ -342,10 +344,13 @@ vector<Operation> ExtractSubGraph(
     // then itself is the only stage in output, and input is empty
     // I.e. Itself is the only stage in subgraph
     if (boundary.size() == 1) break;
-    CHECK(input.size() > 0) 
-      << "Cannot found boundary for output " << output 
+    if (input.size() == 0) {
+      schedule_roll_back = true;
+      LOG(CLEAN) << "[ Critical Warning ] Cannot found the subgraph output " << output 
       << ". The compilation flow requires the device scope to"
-      << " form an enclosed subgraph. Make sure the input tensors are moved to FPGA correctly...";
+      << " form an enclosed subgraph. Offload the whole program to FPGA...";
+      return vector<Operation>();
+    }
   }
 
   // Traverse the graph to find the ops that 
@@ -365,7 +370,7 @@ vector<Operation> ExtractSubGraph(
     stack.pop_back();
  
     // Save op into the subgraph
-    HCL_DEBUG(2) << "Add op " << op << " to the subgraph..."; 
+    HCL_DEBUG_LEVEL(2) << "Add op " << op << " to the subgraph..."; 
     subgraph.insert(subgraph.begin(), op);
     for (const auto& t : g.at(op)) { 
 
@@ -375,7 +380,7 @@ vector<Operation> ExtractSubGraph(
       CHECK(dev.count(t->op.get()));
       if (dev[t->op.get()].is_endpoint) {
           endpoints.push_back(t->op);
-          HCL_DEBUG(2) << "    Endpoint found " << t << "... Setup reach_bonud";
+          HCL_DEBUG_LEVEL(2) << "    Endpoint found " << t << "... Setup reach_bonud";
           reach_bound = true;
       }
 
@@ -417,13 +422,16 @@ vector<Operation> ExtractSubGraph(
   unordered_set<string> subgraph_op_names;
   for (auto& op : subgraph) {
     string name = op->name;
-    CHECK(!subgraph_op_names.count(name)) << name;
+    CHECK(!subgraph_op_names.count(name)) 
+        << "Error: found duplicate stage name " << name << "...";
     subgraph_op_names.insert(name);
   } 
   unordered_map<string, Operation> name2op;
   for (Stage stage : sch->stages) {
     string op_name = stage->op->name;
-    CHECK(!name2op.count(op_name));
+    CHECK(!name2op.count(op_name)) 
+        << "Found stage name duplicate: " << op_name 
+        << " in stages: " << sch->stages;
     name2op[op_name] = stage->op; 
     if (subgraph_op_names.count(op_name)) { 
       order_subgraph_ops.push_back(op_name);
@@ -457,7 +465,14 @@ vector<Operation> ExtractSubGraph(
   unordered_set<string> attached_stages_record;
   for (int i = reordered_subgraph.size() - 1; i >= 0; i--) { 
     auto op = reordered_subgraph[i];
-    CHECK(op.as<ExternOpNode>()) << op;
+
+    if (op.as<ExternOpNode>() == NULL) {
+        schedule_roll_back = true;
+        LOG(CLEAN) << "[ Critical Warning ] The graph information is not complete. "
+        << " Found placeholder " << op << " in the extracted subgraph. "
+        << " Offload the whole program to FPGA...";
+        return vector<Operation>();
+    }
     auto extern_op = op.as<ExternOpNode>();
 
     // Check if the op already has an attaching scope
@@ -481,7 +496,7 @@ vector<Operation> ExtractSubGraph(
 
         auto& substages = stage_to_substage_on_dev[parent_stage_name];
         substages.insert(substages.begin(), extern_op->name);
-        HCL_DEBUG(2) << "---- the stage " << extern_op->name
+        HCL_DEBUG_LEVEL(2) << "---- the stage " << extern_op->name
             << " has a (non-top) parent stage " 
             << parent_stage_name 
             << " (" <<  index << "/" 
@@ -495,7 +510,7 @@ vector<Operation> ExtractSubGraph(
             // that was originally attached to top stage body
             if (stage_to_attach_parent[parent_stage_name] == "_top" &&
                 attached_stages_record.find(parent_stage_name) == attached_stages_record.end()) {
-              HCL_DEBUG(2) << "INFO : The attaching point of " << extern_op->name
+              HCL_DEBUG_LEVEL(2) << "INFO : The attaching point of " << extern_op->name
                   << " is the last BB in the stage body of " << parent_stage_name 
                   << ". Move the whole super stage into device scope...";
               attached_stages_record.insert(parent_stage_name);
@@ -513,7 +528,7 @@ vector<Operation> ExtractSubGraph(
 
     // If the stage has been attached as a super stage before
     if (attached_stages_record.find(extern_op->name) != attached_stages_record.end()) continue;
-    HCL_DEBUG(2) << "---- Attaching " << extern_op->name;
+    HCL_DEBUG_LEVEL(2) << "---- Attaching " << extern_op->name;
     attached_stages_record.insert(extern_op->name);
     CHECK(extern_op->output_placeholders.size() > 0);
     Buffer out_buf = extern_op->output_placeholders[0];
@@ -538,7 +553,11 @@ vector<Operation> ExtractSubGraph(
   // are the boundary of the subgraph)
   for (auto& op : output_ops) {
     auto info = dev[op.get()];
-    CHECK(info.is_endpoint) << op->name << " Must be set as an endpoint";
+    if(!info.is_endpoint) {
+        schedule_roll_back = true;
+        LOG(WARNING) << op->name << " should be set as an endpoint... rolling back";
+        return vector<Operation>();
+    }
     endpoints.push_back(op);
   }
 
@@ -555,6 +574,7 @@ vector<Operation> ExtractSubGraph(
     encode += ":" + std::to_string(info.mem_port);
     encode += ":" + std::to_string(static_cast<int>(info.stream_type));
     encode += ":" + std::to_string(info.channel_depth);
+    encode += ":" + std::to_string(info.burst_len);
     VarExpr var(info.target_tensor);
     body = AttrStmt::make(var, attr::io_interface, StringImm::make(encode), body);
   }
@@ -564,11 +584,11 @@ vector<Operation> ExtractSubGraph(
   aggregate->body = body;
 
   if (debug) {
-    HCL_DEBUG(2) << "----------- Ops in Subgraph --------------";
+    HCL_DEBUG_LEVEL(2) << "----------- Ops in Subgraph --------------";
     for(auto op : reordered_subgraph) 
-        HCL_DEBUG(2) << "    " << op;
-    HCL_DEBUG(2) << "----------- Aggregate Subgraph Op Body --------------";
-    HCL_DEBUG(2) << "\n" << aggregate->body;
+        HCL_DEBUG_LEVEL(2) << "    " << op;
+    HCL_DEBUG_LEVEL(2) << "----------- Aggregate Subgraph Op Body --------------";
+    HCL_DEBUG_LEVEL(2) << "\n" << aggregate->body;
   }
 
   merged_ops.push_back(Operation(aggregate));
@@ -615,12 +635,13 @@ Array<Operation> HostDevPartition(
     // the "endpoint" field of the target stage
     DevScope info;
     if (stage->endpoint.defined()) {
-        HCL_DEBUG(2) << "Endpoint stage " << stage;
+        HCL_DEBUG_LEVEL(2) << "Endpoint stage " << stage;
         info.is_endpoint = true;
         info.storage_type = stage->endpoint.storage_type; 
         info.stream_type = stage->endpoint.stream_type; 
         info.mem_port = stage->endpoint.mem_port; 
         info.channel_depth = stage->endpoint.channel_depth; 
+        info.burst_len = stage->endpoint.burst_len; 
         info.target_tensor = stage->endpoint.target_tensor; 
     }
     info.dev_type = stage->device_type;
@@ -638,9 +659,81 @@ Array<Operation> HostDevPartition(
   // Note: the subgraph does not exactly descibe the compute flow
   // e.g. if there are some other super stages modifying the tensor 
   // before we use the tensor, the read graph does not capture that
+  bool schedule_roll_back = false;
   vector<Operation> subgraph = ExtractSubGraph(roots, g, sch, dev, 
                       boundary, merged_ops, non_subgraph_ops, 
-                      stage_to_attach_parent, stage_to_attach_children);
+                      stage_to_attach_parent, stage_to_attach_children,
+                      schedule_roll_back);
+
+  // If we failed to extract the subgraph, then automatically offload the whole
+  // DFG to the FPGA scope
+  if (schedule_roll_back) {
+
+    // Create a new op that has the top stage as child
+    auto ret_ops = PostDFSOrder(roots, g);
+
+    size_t s = ret_ops.size() - 1;
+    auto top_op = ret_ops[s];
+    CHECK(top_op->name == "_top");
+
+    std::shared_ptr<ExternOpNode> new_op = std::make_shared<ExternOpNode>();
+    new_op->name = "__device_scope"; 
+    auto extern_op = top_op.as<ExternOpNode>();
+
+    new_op->inputs = std::move(extern_op->inputs);
+    new_op->input_placeholders = std::move(extern_op->input_placeholders);
+
+    Buffer void_buffer = BufferNode::make(Var("__device_scope", Handle()),
+        Int(32), Array<Expr>(), Array<Expr>(), Expr(), "__device_scope", "", 0, 0);
+    new_op->output_placeholders.push_back(void_buffer);
+
+    Buffer buf = extern_op->output_placeholders[0];
+    HCL_DEBUG_LEVEL(2) << buf->data;
+    Stmt no_op = Evaluate::make(0);
+    Stmt body = AttrStmt::make(VarExpr(buf.node_), 
+        attr::attach_scope, StringImm::make("__device_scope"), no_op);
+
+    Expr scope = StringImm::make("fpga"); 
+    body = AttrStmt::make(VarExpr(), attr::device_scope, scope, body);
+    // Get endpoint information 
+    for (auto& op : ret_ops) {
+        CHECK(dev.count(op.get())) << op;
+        if (dev[op.get()].is_endpoint) {
+            HCL_DEBUG_LEVEL(2) << "[ info ] found incomplete placement information. "
+                << "Save the op " << op << " info into the IR...";
+            auto info = dev[op.get()];
+            std::string encode = "";
+            encode += std::to_string(static_cast<int>(info.dev_type));
+            encode += ":" + std::to_string(static_cast<int>(info.storage_type));
+            encode += ":" + std::to_string(info.mem_port);
+            encode += ":" + std::to_string(static_cast<int>(info.stream_type));
+            encode += ":" + std::to_string(info.channel_depth);
+            encode += ":" + std::to_string(info.burst_len);
+
+            VarExpr var(info.target_tensor);
+            body = AttrStmt::make(var, attr::io_interface, StringImm::make(encode), body);
+        }
+
+        // Check the unattached partition stages for placeholders
+        if (!stage_to_attach_parent.count(op->name)) {
+            if (op->name != "_top" && op.as<ExternOpNode>()) {
+              HCL_DEBUG_LEVEL(2) << "[ debug ] found stage " << op->name << " attached nowhere. "
+                << "Create an attaching point for it..." ;
+              auto extern_op = op.as<ExternOpNode>();
+              Buffer buf = extern_op->output_placeholders[0];
+              body = AttrStmt::make(VarExpr(buf.node_), 
+                  attr::attach_scope, StringImm::make("__device_scope"), body);
+            }
+        }
+    }
+
+    new_op->body = body;
+    auto new_top = Operation(new_op);
+    HCL_DEBUG_LEVEL(2) << "[ debug ] new top level body: \n "<< body;
+
+    ret_ops.push_back(new_top);
+    return ret_ops;
+  }
 
   // Insert the subgraph ops and the super stage op. Also update
   // the top stage body in different cases
@@ -658,9 +751,9 @@ Array<Operation> HostDevPartition(
         auto op = non_subgraph_ops[m];
         if (dev[op.get()].is_endpoint) {
             insert_point = m + 1;
-            HCL_DEBUG(2) << "Ops (ep) outside the subgraph : " << non_subgraph_ops[m];
+            HCL_DEBUG_LEVEL(2) << "Ops (ep) outside the subgraph : " << non_subgraph_ops[m];
         } else {
-            HCL_DEBUG(2) << "Ops outside the subgraph : " << non_subgraph_ops[m];
+            HCL_DEBUG_LEVEL(2) << "Ops outside the subgraph : " << non_subgraph_ops[m];
         }
         results.push_back(op);
     }
@@ -677,18 +770,18 @@ Array<Operation> HostDevPartition(
         auto name = op->name;
         if (stage_to_attach_parent.count(name)) {
             if (stage_to_attach_parent.at(name) != "_top") {
-                HCL_DEBUG(2) << "--- Found non-top attaching substage " 
+                HCL_DEBUG_LEVEL(2) << "--- Found non-top attaching substage " 
                     << name << " beofore insert point...";
                 host_non_top_substage_num++;
             }
         }
     }
 
-    HCL_DEBUG(2) << "INFO: Final insert point index : " << insert_point;
+    HCL_DEBUG_LEVEL(2) << "INFO: Final insert point index : " << insert_point;
     int current_index = 0;
     for (size_t k = 0; k < subgraph.size(); k++) {
       Operation op = subgraph[k];
-      HCL_DEBUG(2) << "Ops in the subgraph : " << op;
+      HCL_DEBUG_LEVEL(2) << "Ops in the subgraph : " << op;
       results.insert(results.begin() + insert_point + current_index, op);
       current_index++;
     }
@@ -712,8 +805,8 @@ Array<Operation> HostDevPartition(
         auto extern_op = op.as<ExternOpNode>();
         CHECK(extern_op) << "The top op node is not an ExternOpNode...";
 
-        HCL_DEBUG(2) << "========= Original Top Op Body =============";
-        HCL_DEBUG(2) << extern_op->body;
+        HCL_DEBUG_LEVEL(2) << "========= Original Top Op Body =============";
+        HCL_DEBUG_LEVEL(2) << extern_op->body;
 
         new_op->inputs = std::move(extern_op->inputs);
         new_op->input_placeholders = std::move(extern_op->input_placeholders);
@@ -722,8 +815,8 @@ Array<Operation> HostDevPartition(
         new_op->body = AttachScopeReorder(attr_insert_point, subgraph, non_subgraph_ops, 
                            merged_ops, stage_to_attach_parent, stage_to_attach_children);
 
-        HCL_DEBUG(2) << "========= Restrctured Top Op Body =============";
-        HCL_DEBUG(2) << new_op->body;
+        HCL_DEBUG_LEVEL(2) << "========= Restrctured Top Op Body =============";
+        HCL_DEBUG_LEVEL(2) << new_op->body;
         op = Operation(new_op);
       }
       post_order.push_back(op);
@@ -733,12 +826,12 @@ Array<Operation> HostDevPartition(
       << "Missing ops in result. size " << results.size() << ":" << sch->stages.size()
       << post_order;
 
-    HCL_DEBUG(2) << "\n";
-    HCL_DEBUG(2) << "=========== Ops after schedule reorder =============";
-    HCL_DEBUG(2) << post_order;
-    HCL_DEBUG(2) << "\n";
-    HCL_DEBUG(2) << "=========== Ops before schedule reorder =============";
-    HCL_DEBUG(2) << PostDFSOrder(roots, g) << "\n";
+    HCL_DEBUG_LEVEL(2) << "\n";
+    HCL_DEBUG_LEVEL(2) << "=========== Ops after schedule reorder =============";
+    HCL_DEBUG_LEVEL(2) << post_order;
+    HCL_DEBUG_LEVEL(2) << "\n";
+    HCL_DEBUG_LEVEL(2) << "=========== Ops before schedule reorder =============";
+    HCL_DEBUG_LEVEL(2) << PostDFSOrder(roots, g) << "\n";
     return post_order;
   } 
 
@@ -757,7 +850,7 @@ Array<Operation> HostDevPartition(
 Schedule ScopePartition(const Schedule& sch) {
 
   if (sch->super_stages.size() > 0) {
-    HCL_DEBUG(2) << "Already partitioned scope."
+    HCL_DEBUG_LEVEL(2) << "Already partitioned scope."
         << " return original schedule...";
     return sch;
   }
@@ -848,14 +941,14 @@ Schedule ScopePartition(const Schedule& sch) {
           smap[s] = scopy;
           // Replace stage op body for _top
           if (scopy->op->name == "_top") {
-            // HCL_DEBUG(2) << scopy;
-            // HCL_DEBUG(2) << op.as<ExternOpNode>()->body;
-            // HCL_DEBUG(2) << scopy->op.as<ExternOpNode>()->body;
+            // HCL_DEBUG_LEVEL(2) << scopy;
+            // HCL_DEBUG_LEVEL(2) << op.as<ExternOpNode>()->body;
+            // HCL_DEBUG_LEVEL(2) << scopy->op.as<ExternOpNode>()->body;
             scopy = Stage(op);
             n->stage_map.Set(op, scopy);
           }
 
-          HCL_DEBUG(2) << "---- Adding stage copy " << scopy->op->name << "...";
+          HCL_DEBUG_LEVEL(2) << "---- Adding stage copy " << scopy->op->name << "...";
           n->stages.push_back(scopy);
         }
       }
@@ -863,7 +956,7 @@ Schedule ScopePartition(const Schedule& sch) {
 
     // Merged stage hypernode
     if (!scopy.defined()) {
-      HCL_DEBUG(2) << "---- Creating merged stage " << op->name << "...";
+      HCL_DEBUG_LEVEL(2) << "---- Creating merged stage " << op->name << "...";
       Stage stage = Stage(op);
       n->stage_map.Set(op, stage);
       n->stages.push_back(stage);
