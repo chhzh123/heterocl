@@ -3,7 +3,8 @@ import os
 def hardcode(filename):
     code = open(filename,"r").readlines()
     new_code, const = move_const(code)
-    new_code = move_pipeline_inward(new_code)
+    # new_code = move_pipeline_inward(new_code)
+    new_code = remove_interface(new_code)
     with open(filename,"w") as outfile:
         outfile.write(new_code)
     with open(os.path.join("/".join(filename.split("/")[:-1]),"const.h"),"w") as const_file:
@@ -20,6 +21,13 @@ def move_const(code):
             res.append(line)
     res.insert(11,'#include "const.h"\n\n')
     return "".join(res), "".join(const)
+
+def remove_interface(code):
+    res = ""
+    for i,line in enumerate(code.split("\n")):
+        if not "#pragma HLS INTERFACE" in line:
+            res += line +"\n"
+    return res
 
 def move_pipeline_inward(code):
     res = []
