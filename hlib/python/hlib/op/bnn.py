@@ -572,18 +572,15 @@ def packed_max_pool2d_LB(
     dtype = data.dtype
     maxpool = hcl.compute((batch, channel, out_height, out_width), lambda i, c, h, w: 0, name+"_res", dtype)
     LB = hcl.compute((2, width), lambda x, y: 0, name+"_LB", dtype)
-    with hcl.Stage(name):
-        with hcl.for_(0, batch, name=name+"_ii") as ii:
-            with hcl.for_(0, channel, name=name+"_cc") as cc:
-                with hcl.for_(0, height, name=name+"_hh") as hh:
-                    with hcl.for_(0, width, name=name+"_ww") as ww:
-                        val = hcl.scalar(0, name+"_val", dtype=dtype)
-                        LB[hh % 2, ww] = data[ii, cc, hh, ww]
-                        with hcl.if_(tvm.all(hh % 2 == 1, ww % 2 == 1)):
-                            with hcl.for_(0, 2, name=name+"_ry") as ry:
-                                with hcl.for_(-1, 1, name=name+"_rx") as rx:
-                                    val.v |= LB[ry, ww + rx]
-                            maxpool[ii, cc, hh / 2, ww / 2] = val.v
+    def loop_body(ii, cc, hh, ww):
+        val = hcl.scalar(0, name+"_val", dtype=dtype)
+        LB[hh % 2, ww] = data[ii, cc, hh, ww]
+        with hcl.if_(tvm.all(hh % 2 == 1, ww % 2 == 1)):
+            with hcl.for_(0, 2, name=name+"_ry") as ry:
+                with hcl.for_(-1, 1, name=name+"_rx") as rx:
+                    val.v |= LB[ry, ww + rx]
+            maxpool[ii, cc, hh / 2, ww / 2] = val.v
+    hcl.mutate((batch, channel, height, width), lambda ii, cc, hh, ww: loop_body(ii, cc, hh, ww), name)
     return maxpool
 
 def packed_max_pool2d_nhwc_LB(
