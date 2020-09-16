@@ -610,18 +610,18 @@ def packed_max_pool2d_nhwc_LB(
     out_width = simplify(
         (width - pooling_w + pad_left + pad_right) // stride_w + 1)
     dtype = data.dtype
+    maxpool = hcl.compute((batch, out_height, out_width, channel), lambda i, h, w, c: 0, name+"_res", dtype)
     LB = hcl.compute((2, width), lambda x, y: 0, name+"_LB", dtype)
-    def _pool(ii, hh, ww, cc):
+    def loop_body(ii, hh, ww, cc):
         val = hcl.scalar(0, name+"_val", dtype=dtype)
-        with hcl.for_(0, 2, name=name+"_LB_i") as LB_i:
-            with hcl.for_(0, width, name=name+"_LB_j") as LB_j:
-                LB[LB_i, LB_j] = data[ii, hh * 2 + LB_i, LB_j, cc]
-        with hcl.for_(0, 2, name=name+"_r") as r:
-            with hcl.for_(0, 2, name=name+"_c") as c:
-                val.v |= LB[r, ww * 2 + c]
-        return val.v
-    return hcl.compute((batch, out_height, out_width, channel),
-                       lambda i, h, w, c: _pool(i,h,w,c), name, dtype)
+        LB[hh % 2, ww] = data[ii, hh, ww, cc]
+        with hcl.if_(tvm.all(hh % 2 == 1, ww % 2 == 1)):
+            with hcl.for_(0, 2, name=name+"_ry") as ry:
+                with hcl.for_(-1, 1, name=name+"_rx") as rx:
+                    val.v |= LB[ry, ww + rx]
+            maxpool[ii, hh / 2, ww / 2, cc] = val.v
+    hcl.mutate((batch, height, width, channel), lambda ii, hh, ww, cc: loop_body(ii, hh, ww, cc), name)
+    return maxpool
 
 def batch_norm(
         data,
