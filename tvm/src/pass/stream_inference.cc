@@ -10,6 +10,7 @@
 #include <tvm/operation.h>
 #include <unordered_map>
 #include "./ir_util.h"
+#include "ir/IREquality.h"
 
 namespace TVM {
 namespace ir {
@@ -102,7 +103,7 @@ class NewChannelGathers final : public IRMutator {
             Expr prev_index = target_load_access_indices[0];
 
             // Same buffer access with different index
-            if (! op->index.same_as(prev_index)) {
+            if (! Halide::Internal::equal(op->index,prev_index)) {
               LOG(FATAL) << "Invalid FIFO consumer \"" << name << "\". "
                 << "It has more than buffer "
                 << "access with different indices: " << name << "["
