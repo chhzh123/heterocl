@@ -3,8 +3,7 @@ import os
 def hardcode(filename):
     code = open(filename,"r").readlines()
     new_code, const = move_const(code)
-    # new_code = move_pipeline_inward(new_code)
-    new_code = remove_interface(new_code)
+    new_code = move_pipeline_inward(new_code)
     with open(filename,"w") as outfile:
         outfile.write(new_code)
     with open(os.path.join("/".join(filename.split("/")[:-1]),"const.h"),"w") as const_file:
