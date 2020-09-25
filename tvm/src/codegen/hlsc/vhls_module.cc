@@ -253,6 +253,8 @@ void GenHostCode(TVMArgs& args,
   int indent = 0;
   std::ofstream stream;
   stream.open("main.cpp");
+  stream << "#include <gmp.h>\n"
+         << "#define __gmp_const const\n";
   stream << "#include <sys/ipc.h>\n";
   stream << "#include <sys/shm.h>\n";
   stream << test_file;

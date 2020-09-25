@@ -366,6 +366,8 @@ void GenKernelCode(std::string& test_file, std::vector<std::string> arg_names,
 
   // create typedef and header 
   if (platform == "vivado_hls" || platform == "sdsoc") { 
+    stream << "#include <gmp.h>\n"
+           << "#define __gmp_const const\n";
 
     // add header file to host code 
     auto pos = test_file.rfind("#include ");
@@ -448,6 +450,8 @@ void GenKernelCode(std::string& test_file, std::vector<std::string> arg_names,
 void GenHostHeaders(std::ofstream& stream,
                     std::string platform, std::string include) {
   stream << R"(
+#include <gmp.h>
+#define __gmp_const const
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
@@ -551,13 +555,13 @@ void GenHostCode(TVMArgs& args,
   for (int i = 0; i < args.size(); i++) {
     if (args[i].type_code() == kArrayHandle) {
       // read from the shared memory
-      PrintIndent(stream, indent);
-      stream << Type2Byte(arg_types[i]) << "* "; 
-      stream << "arg_" << i << " = ";
-      stream << "(" << Type2Byte(arg_types[i]) << "*)";
-      stream << "shmat(/*" << arg_names[i] << "*/" 
-             << shmids[i] << ", nullptr, 0);\n";
-      PrintIndent(stream, indent);
+      // PrintIndent(stream, indent);
+      // stream << Type2Byte(arg_types[i]) << "* "; 
+      // stream << "arg_" << i << " = ";
+      // stream << "(" << Type2Byte(arg_types[i]) << "*)";
+      // stream << "shmat(/*" << arg_names[i] << "*/" 
+      //        << shmids[i] << ", nullptr, 0);\n";
+      // PrintIndent(stream, indent);
 
       TVMArray* arr = args[i];
       stream << "auto ";
@@ -589,7 +593,7 @@ void GenHostCode(TVMArgs& args,
         }
       }
       stream << "];\n";
-      PrintCopy(arr, arg_names, stream, indent, i);
+      // PrintCopy(arr, arg_names, stream, indent, i);
 
     } else {
       // read from shared mem for var 
@@ -721,15 +725,15 @@ void GenHostCode(TVMArgs& args,
   stream << code << "\n";
 
   // copy to shared mem
-  for (int i = 0; i < args.size(); i++) {
-    if (args[i].type_code() == kArrayHandle) {
-      TVMArray* arr = args[i];
-      PrintCopyBack(arr, arg_names, stream, indent, i);
-      PrintIndent(stream, indent);
-      stream << "shmdt(";
-      stream << "arg_" << i << ");\n";
-    }
-  }
+  // for (int i = 0; i < args.size(); i++) {
+  //   if (args[i].type_code() == kArrayHandle) {
+  //     TVMArray* arr = args[i];
+  //     PrintCopyBack(arr, arg_names, stream, indent, i);
+  //     PrintIndent(stream, indent);
+  //     stream << "shmdt(";
+  //     stream << "arg_" << i << ");\n";
+  //   }
+  // }
 
   stream << "\n\n";
   PrintIndent(stream, indent);
