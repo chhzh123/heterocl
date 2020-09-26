@@ -194,8 +194,8 @@ def compute_body(name,
             stmt = _make.For(stmt.loop_var,
                              stmt.min, stmt.extent,
                              0, 0, stmt.body,
-                             list(stmt.annotate_keys) + list(attrs.keys()),
-                             list(stmt.annotate_values) + list(attrs.values()))
+                             list(stmt.annotate_keys) +list(attrs.keys()),
+                             list(stmt.annotate_values) +list(attrs.values()))
         stage.emit(stmt)
         stage.axis_list = indices + stage.axis_list
 
