@@ -178,7 +178,7 @@ void CodeGenVivadoHLS::VisitExpr_(const GetSlice* op, std::ostream& os) {
 
 void CodeGenVivadoHLS::VisitExpr_(const Load* op, std::ostream& os) {
   std::string vid = GetVarID(op->buffer_var.get());
-  // TODO: find a betetr way to track streaming channels 
+  // TODO: find a better way to track streaming channels 
   if (stream_vars.find(vid) != stream_vars.end()) {
     PrintIndent(); 
     stream << vid << "_temp = " << vid << ".read();\n";
@@ -202,6 +202,12 @@ void CodeGenVivadoHLS::VisitStmt_(const Store* op) {
     stream << vid << ".write(" << vid << "_temp);\n";
     return;
   }
+  if (vid.find("_channel") != std::string::npos ||
+          vid.find("_pipe") != std::string::npos) {
+            PrintIndent(); 
+            stream << vid << ".write(" << PrintExpr(op->value) << ");\n";
+            return;
+          }
 
   // handle SetSlice
   if (const SetSlice* ss = op->value.as<SetSlice>()) {
@@ -296,6 +302,14 @@ void CodeGenVivadoHLS::VisitStmt_(const Allocate* op) {
         }
         stream << ")";
       } else {
+        if (vid.find("_channel") != std::string::npos ||
+          vid.find("_pipe") != std::string::npos) {
+
+          stream << "hls::stream<";
+          PrintType(op->type, stream);
+          stream << " > " << vid;
+
+        } else {
         PrintType(op->type, stream);
         stream << ' '<< vid;
         // stream << '[' << constant_size << "]";
@@ -316,6 +330,7 @@ void CodeGenVivadoHLS::VisitStmt_(const Allocate* op) {
             }
             PrintArray(op->init_values, extents, stream, 0, 0);
           }
+        }
         }
       }
       

@@ -753,10 +753,15 @@ inline bool TryGetRamp1Base(Expr index, int lanes, Expr *base) {
 
 void CodeGenC::VisitExpr_(const Load* op, std::ostream& os) {  // NOLINT(*)
   int lanes = op->type.lanes();
+  std::string vid = GetVarID(op->buffer_var.get());
   // delcare type.
   if (op->type.lanes() == 1) {
     std::string ref = GetBufferRef(op->type, op->buffer_var.get(), op->index);
-    os << ref;
+    if (vid.find("_channel") != std::string::npos ||
+        vid.find("_pipe") != std::string::npos)
+          os << vid << ".read()";
+    else
+      os << ref;
   } else {
     CHECK(is_one(op->predicate))
         << "predicated load is not supported";
