@@ -14,11 +14,11 @@ def move_const(code):
     const = []
     res = []
     for line in code:
-        if "const" in line:
+        if "const" in line and "#define" not in line:
             const.append(line.strip()+"\n")
         else:
             res.append(line)
-    res.insert(11,'#include "const.h"\n\n')
+    res.insert(13,'#include "const.h"\n\n')
     return "".join(res), "".join(const)
 
 def remove_interface(code):
@@ -32,7 +32,7 @@ def move_pipeline_inward(code):
     res = []
     idx = []
     for i,line in enumerate(code.split("\n")):
-        if "conv1_ff" in line or "conv2_ff" in line:
+        if ("conv1_ff" in line or "conv2_ff" in line) and line.strip()[0] == 'c':
             idx.append(i)
         res.append(line)
     for i in idx:

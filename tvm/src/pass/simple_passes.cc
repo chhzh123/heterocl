@@ -171,9 +171,9 @@ std::vector<Expr> ExtractIndices(Expr index,
     Expr simple_index = Simplify(index % shape[i]);
     // remove modulo
     if (const Mod* op = simple_index.as<Mod>()) {
-      // Expr max = Simplify(Substitute(op->a, range) + 1);
-      // Expr comp = Simplify(max <= op->b);
-      // if (is_one(comp))
+      Expr max = Simplify(Substitute(op->a, range) + 1);
+      Expr comp = Simplify(max <= op->b);
+      if (is_one(comp))
         simple_index = op->a;
     }
     new_index.push_back(simple_index);
