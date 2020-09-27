@@ -115,7 +115,7 @@ void CodeGenHLSC::GenForStmt(const For* op, std::string pragma, bool before) {
     }
   }
   if (!loop_stage_name)
-    stream << vid << ": ";
+    stream << "loop_" << vid << ": ";
   stream << "for (";
   PrintType(op->loop_var.type(), stream);
   stream << ' ' << vid << " = 0; "
