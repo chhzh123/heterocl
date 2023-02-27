@@ -258,12 +258,12 @@ Finally, let's run the algorithm and check the results
  .. code-block:: none
 
     Input tensors:
-    array([55, 74,  6, 85, 78, 75, 38, 52, 55, 97])
-    array([86, 37,  0, 38, 21, 78, 54, 74, 51, 17])
-    array([26, 98, 61, 68, 68, 34, 95, 37, 36,  4])
-    array([12, 18, 29, 73, 33,  4, 53, 20, 86, 85])
+    array([35,  6, 95, 66, 58, 86, 28, 15, 40, 64])
+    array([26, 98, 70, 97, 96, 35, 69, 68,  6, 63])
+    array([56, 42, 12, 27, 15, 98, 96, 16, 65, 93])
+    array([62, 72, 61,  4, 35, 64, 84, 98, 73, 86])
     Output tensor:
-    array([86, 98, 61, 85, 78, 78, 95, 74, 86, 97])
+    array([62, 98, 95, 97, 96, 98, 96, 98, 73, 93])
 
 
 
@@ -348,7 +348,7 @@ the same as our first example.
  .. code-block:: none
 
     Output tensor:
-    array([86, 98, 61, 85, 78, 78, 95, 74, 86, 97])
+    array([62, 98, 95, 97, 96, 98, 96, 98, 73, 93])
 
 
 
@@ -422,7 +422,7 @@ Let's run it.
  .. code-block:: none
 
     Downsized output tensor:
-    array([12, 10, 13,  9, 14, 14, 15, 10,  7,  5])
+    array([14, 10, 15, 11, 15,  6, 12, 15,  9, 15])
 
 
 
@@ -452,7 +452,7 @@ check this.
 
 .. rst-class:: sphx-glr-timing
 
-   **Total running time of the script:** ( 0 minutes  0.207 seconds)
+   **Total running time of the script:** ( 0 minutes  0.276 seconds)
 
 
 .. _sphx_glr_download_gallery_tutorial_07_module.py:
