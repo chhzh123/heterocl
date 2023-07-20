@@ -102,7 +102,10 @@ def _reset_builder():
     UniqueName.reset()
 
 
-def customize(inputs, func=None, name=""):
+def create_schedule(inputs, func=None, name=""):
+    """Create a schedule for compute optimizations.
+    inputs: list of Tensor
+    """
     try:
         _ast = _build_ast(inputs, func, name)
         s = _build_schedule(_ast, inputs, func, name)
@@ -111,13 +114,6 @@ def customize(inputs, func=None, name=""):
         raise e
     finally:
         _reset_builder()
-
-
-def create_schedule(inputs, func=None, name=""):
-    """Create a schedule for compute optimizations.
-    inputs: list of Tensor
-    """
-    return customize(inputs, func, name)
 
 
 class Schedule:

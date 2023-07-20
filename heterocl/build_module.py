@@ -31,7 +31,7 @@ from .ast import ast
 
 def _mlir_lower_pipeline(module):
     hcl_d.loop_transformation(module)
-    pipeline = "func.func(affine-loop-normalize, cse, affine-simplify-structures)"
+    pipeline = "func.func(affine-loop-normalize, cse, affine-simplify-structures, canonicalize)"
     try:
         with get_context():
             mlir_pass_manager.parse(pipeline).run(module)

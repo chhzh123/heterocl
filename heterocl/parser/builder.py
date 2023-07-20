@@ -2,15 +2,11 @@
 
 import ast
 from hcl_mlir.ir import (
-    Module,
-    Context,
     Location,
     InsertionPoint,
     FunctionType,
     MemRefType,
-    IndexType,
     StringAttr,
-    IntegerAttr,
     AffineExpr,
     AffineMap,
     AffineMapAttr,
@@ -24,7 +20,7 @@ from hcl_mlir.dialects import (
 )
 from hcl_mlir import get_mlir_type
 from ..utils import get_src_loc
-from ..context import get_context, set_context, get_location
+from ..context import get_context, get_location
 from ..ir.transform import build_for_loops
 
 
@@ -41,7 +37,6 @@ def get_extra_type_hints_from_str(dtype):
 
 class Builder:
     def __call__(self, ctx, node):
-        print("call", node)
         method = getattr(self, "build_" + node.__class__.__name__, None)
         if method is None:
             error_msg = f'Unsupported node "{node.__class__.__name__}"'
@@ -55,6 +50,7 @@ class ASTContext:
         self.ip_stack = []
         self.buffers = {}
         self.induction_vars = {}
+        self.top_func = None
 
 
 class ASTTransformer(Builder):
@@ -78,12 +74,10 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Assign(ctx, node):
-        print(node)
         build_stmt(ctx, node.value)
 
     @staticmethod
     def build_Attribute(ctx, node):
-        print(node)
         build_stmt(ctx, node.value)
 
     @staticmethod
@@ -219,7 +213,7 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_FunctionDef(ctx, node):
-        ip = InsertionPoint(module.body)
+        ip = ctx.ip_stack[-1]
         filename, lineno = get_src_loc()
         loc = Location.file(filename, lineno, 0)
         input_types = []
@@ -251,7 +245,7 @@ class ASTTransformer(Builder):
             ctx.buffers[name] = arg
         ctx.ip_stack.append(InsertionPoint(func_op.entry_block))
         build_stmts(ctx, node.body)
-        print(module)
+        ctx.top_func = func_op
 
     @staticmethod
     def build_Module(ctx, node):
@@ -261,7 +255,6 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Call(ctx, node):
-        print(node)
         build_stmt(ctx, node.func)
         build_stmts(ctx, node.args)
         build_stmts(ctx, node.keywords)
@@ -273,10 +266,6 @@ class ASTTransformer(Builder):
         return
 
 
-set_context()
-with get_context() as mlir_ctx, get_location():
-    hcl_d.register_dialect(mlir_ctx)
-    module = Module.create()
 build_stmt = ASTTransformer()
 
 

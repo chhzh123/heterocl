@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # pylint: disable=redefined-builtin
 
-from .schedule import Schedule, customize, create_schedule
+from .schedule import Schedule, create_schedule
+from .customize import customize
 from .primitives.base import Primitive, register_primitive
 from .primitives.partition import Partition
 from .scheme import Scheme, create_scheme, create_schedule_from_scheme

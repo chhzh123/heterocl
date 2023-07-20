@@ -1,26 +1,21 @@
-import ast
 import sys
+import heterocl as hcl
+from heterocl.ir.types import int32
 
-test_p = """
-def gemm(A, B):
-    k = hcl.reduce_axis(0, K, name="k")
-    C = hcl.compute((M, N), lambda i, j: hcl.sum(A[i, k] * B[k, j], axis=k), "C")
-    return C
-"""
-test_p2 = """
-def gemm(A: int32[32, 32],
-         B: int32[32, 32]) -> int32[32, 32]:
+
+def gemm(A: int32[32, 32], B: int32[32, 32]) -> int32[32, 32]:
     C: int32[32, 32] = 0
     for i, j, k in hcl.grid(32, 32, 32):
         C[i, j] += A[i, k] * B[k, j]
     return C
-"""
-tree = ast.parse(test_p2)
-print(ast.dump(tree))
-from heterocl.parser.builder import ASTTransformer, ASTContext
 
-ast_transformer = ASTTransformer()
-print(ast_transformer(ASTContext(), tree))
+
+s = hcl.customize(gemm)
+s.split("i", 8)
+s.split("j", 8)
+s.reorder("i.outer", "j.outer", "i.inner", "j.inner")
+print(s.module)
+# transformations are applied immediately
 
 sys.exit()
 

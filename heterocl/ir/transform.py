@@ -5,6 +5,15 @@
 import hcl_mlir
 from hcl_mlir import UnitAttr, StringAttr, InsertionPoint, MemRefType
 from hcl_mlir.dialects import memref as memref_d
+from hcl_mlir.dialects import affine as affine_d
+
+
+def get_loop_band_names(func):
+    results = []
+    for op in func.entry_block.operations:
+        if isinstance(op, affine_d.AffineForOp):
+            results.append(op.attributes["op_name"])
+    return results
 
 
 def get_affine_loop_nests(func):
