@@ -133,7 +133,10 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_range_for(ctx, node):
         ip = ctx.get_ip()
-        grid = [x.value for x in node.iter.args]
+        grid = [
+            x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
+            for x in node.iter.args
+        ]
         names = [node.target.id]
         for_loops = build_for_loops(grid, ip, names)
         ivs = [loop.induction_variable for loop in for_loops]
@@ -147,7 +150,10 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_grid_for(ctx, node):
         ip = ctx.get_ip()
-        grid = [x.value for x in node.iter.args]
+        grid = [
+            x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
+            for x in node.iter.args
+        ]
         names = [x.id for x in node.target.elts]
         for_loops = build_for_loops(grid, ip, names)
         ivs = [loop.induction_variable for loop in for_loops]
@@ -350,7 +356,10 @@ class ASTTransformer(Builder):
             raise RuntimeError("Only support zero value for now")
         if isinstance(type_hint, ast.Subscript):
             type_str = type_hint.value.id
-            shape = [x.value for x in type_hint.slice.value.elts]
+            shape = [
+                x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
+                for x in type_hint.slice.value.elts
+            ]
             ele_type = get_mlir_type(type_str)
             memref_type = MemRefType.get(shape, ele_type)
             alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
@@ -380,7 +389,10 @@ class ASTTransformer(Builder):
         def build_type(type_hint):
             if isinstance(type_hint, ast.Subscript):
                 type_str = type_hint.value.id
-                shape = [x.value for x in type_hint.slice.value.elts]
+                shape = [
+                    x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
+                    for x in type_hint.slice.value.elts
+                ]
                 ele_type = get_mlir_type(type_str)
                 memref_type = MemRefType.get(shape, ele_type)
             elif isinstance(type_hint, ast.Name):
