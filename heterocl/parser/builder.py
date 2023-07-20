@@ -6,11 +6,14 @@ from hcl_mlir.ir import (
     InsertionPoint,
     FunctionType,
     MemRefType,
+    IntegerType,
+    IntegerAttr,
     StringAttr,
     AffineExpr,
     AffineConstantExpr,
     AffineMap,
     AffineMapAttr,
+    IntegerSet,
 )
 from hcl_mlir.dialects import (
     hcl as hcl_d,
@@ -76,6 +79,20 @@ class MockArg:
         return self.arg
 
 
+class MockConstant:
+    def __init__(self, val, ctx):
+        self.val = val
+        self.ctx = ctx
+
+    @property
+    def result(self):
+        # TODO: Support other types
+        dtype = IntegerType.get_signless(32)
+        value_attr = IntegerAttr.get(dtype, self.val)
+        const_op = arith_d.ConstantOp(dtype, value_attr, ip=self.ctx.get_ip())
+        return const_op.result
+
+
 class ASTTransformer(Builder):
     @staticmethod
     def build_Name(ctx, node):
@@ -87,7 +104,7 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Constant(ctx, node):
-        return node
+        return MockConstant(node.value, ctx)
 
     @staticmethod
     def build_keyword(ctx, node):
@@ -122,6 +139,7 @@ class ASTTransformer(Builder):
         ivs = [loop.induction_variable for loop in for_loops]
         for name, iv in zip(names, ivs):
             ctx.induction_vars[name] = iv
+            ctx.buffers[name] = MockArg(iv)
         ctx.set_ip(for_loops[-1].body.operations[0])
         build_stmts(ctx, node.body)
         ctx.pop_ip()
@@ -326,6 +344,10 @@ class ASTTransformer(Builder):
         filename, lineno = get_src_loc()
         loc = Location.file(filename, lineno, 0)
         type_hint = node.annotation
+        if not isinstance(node.value, ast.Constant):
+            raise RuntimeError("Only support constant value for now")
+        if node.value.value != 0:
+            raise RuntimeError("Only support zero value for now")
         if isinstance(type_hint, ast.Subscript):
             type_str = type_hint.value.id
             shape = [x.value for x in type_hint.slice.value.elts]
@@ -394,6 +416,38 @@ class ASTTransformer(Builder):
         ctx.top_func = func_op
 
     @staticmethod
+    def build_Compare(ctx, node):
+        eq_flags = []
+        cond_op = node.ops[0]
+        if not isinstance(cond_op, ast.Eq):
+            raise NotImplementedError("Only support '==' for now")
+        exprs = []
+        exprs.append(
+            AffineExpr.get_dim(0) - AffineConstantExpr.get(node.comparators[0].value)
+        )
+        eq_flags.append(True)
+        if_cond_set = IntegerSet.get(1, 0, exprs, eq_flags)
+        attr = hcl_d.IntegerSetAttr.get(if_cond_set)
+        return attr, ctx.buffers[node.left.id]
+
+    @staticmethod
+    def build_If(ctx, node):
+        # Should build the condition on-the-fly
+        cond, var = build_stmt(ctx, node.test)
+        if_op = affine_d.AffineIfOp(
+            cond, [var.result], ip=ctx.get_ip(), hasElse=len(node.orelse), results_=[]
+        )
+        ctx.set_ip(if_op.then_block)
+        build_stmts(ctx, node.body)
+        affine_d.AffineYieldOp([], ip=ctx.get_ip())
+        ctx.pop_ip()
+        if len(node.orelse) > 0:
+            ctx.set_ip(if_op.else_block)
+            build_stmts(ctx, node.orelse)
+            affine_d.AffineYieldOp([], ip=ctx.get_ip())
+            ctx.pop_ip()
+
+    @staticmethod
     def build_Module(ctx, node):
         for stmt in node.body:
             build_stmt(ctx, stmt)
@@ -408,7 +462,17 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_Return(ctx, node):
         ip = ctx.pop_ip()
-        func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ip)
+        if MemRefType(ctx.buffers[node.value.id].result.type).shape == [1]:  # scalar
+            affine_map = AffineMap.get(
+                dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
+            )
+            affine_attr = AffineMapAttr.get(affine_map)
+            load = affine_d.AffineLoadOp(
+                ctx.buffers[node.value.id].result, [], affine_attr, ip=ip
+            )
+            func_d.ReturnOp([load.result], ip=ip)
+        else:
+            func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ip)
         return
 
 
