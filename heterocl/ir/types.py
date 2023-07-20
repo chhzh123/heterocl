@@ -10,4 +10,11 @@ class HIRType:
         pass
 
 
+bool = HIRType(1)
+int1 = HIRType(1)
+int8 = HIRType(8)
+int16 = HIRType(16)
 int32 = HIRType(32)
+float16 = HIRType(16)
+float32 = HIRType(32)
+float64 = HIRType(64)

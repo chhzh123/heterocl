@@ -184,13 +184,23 @@ class ASTTransformer(Builder):
             raise RuntimeError("Unsupported for loop")
 
     @staticmethod
-    def build_BinOp(ctx, node):
-        lhs = build_stmt(ctx, node.left)
-        rhs = build_stmt(ctx, node.right)
-        op = {
-            ast.Add: arith_d.AddIOp,
-            ast.Sub: arith_d.SubIOp,
-            ast.Mult: arith_d.MulIOp,
+    def build_general_binop(ctx, node, lhs, rhs):
+        opcls = {
+            ast.Add: {
+                "float": arith_d.AddFOp,
+                "int": arith_d.AddIOp,
+                "fixed": hcl_d.AddFixedOp,
+            },
+            ast.Sub: {
+                "float": arith_d.SubFOp,
+                "int": arith_d.SubIOp,
+                "fixed": hcl_d.SubFixedOp,
+            },
+            ast.Mult: {
+                "float": arith_d.MulFOp,
+                "int": arith_d.MulIOp,
+                "fixed": hcl_d.MulFixedOp,
+            },
             # FIXME
             ast.Div: lambda l, r: l / r,
             ast.FloorDiv: lambda l, r: l // r,
@@ -202,8 +212,22 @@ class ASTTransformer(Builder):
             ast.BitXor: lambda l, r: l ^ r,
             ast.BitAnd: lambda l, r: l & r,
         }.get(type(node.op))
-        # FIXME
+        dtype = str(lhs.result.type)
+        if dtype.startswith("i"):
+            op = opcls["int"]
+        elif dtype.startswith("fixed"):
+            op = opcls["fixed"]
+        elif dtype.startswith("f"):
+            op = opcls["float"]
+        else:
+            raise RuntimeError("Unsupported types for binary op: {}".format(dtype))
         return op(lhs, rhs, ip=ctx.get_ip())
+
+    @staticmethod
+    def build_BinOp(ctx, node):
+        lhs = build_stmt(ctx, node.left)
+        rhs = build_stmt(ctx, node.right)
+        return ASTTransformer.build_general_binop(ctx, node, lhs, rhs)
 
     @staticmethod
     def build_store(ctx, node, val):
@@ -278,22 +302,7 @@ class ASTTransformer(Builder):
         else:
             raise RuntimeError("Unsupported AugAssign")
         # Aug LHS
-        op = {
-            ast.Add: arith_d.AddIOp,
-            ast.Sub: arith_d.SubIOp,
-            ast.Mult: arith_d.MulIOp,
-            # FIXME
-            ast.Div: lambda l, r: l / r,
-            ast.FloorDiv: lambda l, r: l // r,
-            ast.Mod: lambda l, r: l % r,
-            ast.Pow: lambda l, r: l**r,
-            ast.LShift: lambda l, r: l << r,
-            ast.RShift: lambda l, r: l >> r,
-            ast.BitOr: lambda l, r: l | r,
-            ast.BitXor: lambda l, r: l ^ r,
-            ast.BitAnd: lambda l, r: l & r,
-        }.get(type(node.op))
-        res = op(lhs, rhs, ip=ip)
+        res = ASTTransformer.build_general_binop(ctx, node, lhs, rhs)
         # Store LHS
         store_op = ASTTransformer.build_store(ctx, node.target, res)
         return store_op
