@@ -46,11 +46,23 @@ class Builder:
 
 
 class ASTContext:
-    def __init__(self):
+    def __init__(self, global_vars):
         self.ip_stack = []
         self.buffers = {}
         self.induction_vars = {}
         self.top_func = None
+        self.global_vars = global_vars
+
+    def set_ip(self, ip):
+        if not isinstance(ip, InsertionPoint):
+            ip = InsertionPoint(ip)
+        self.ip_stack.append(ip)
+
+    def get_ip(self):
+        return self.ip_stack[-1]
+
+    def pop_ip(self):
+        return self.ip_stack.pop()
 
 
 class ASTTransformer(Builder):
@@ -60,7 +72,7 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_AnnAssign(ctx, node):
-        ip = ctx.ip_stack[-1]
+        ip = ctx.get_ip()
         filename, lineno = get_src_loc()
         loc = Location.file(filename, lineno, 0)
         type_hint = node.annotation
@@ -109,19 +121,47 @@ class ASTTransformer(Builder):
         return node
 
     @staticmethod
-    def build_For(ctx, node):
-        if node.orelse:
-            raise RuntimeError("'else' clause for 'for' not supported in HCL kernels")
-        ip = ctx.ip_stack[-1]
+    def build_range_for(ctx, node):
+        ip = ctx.get_ip()
+        grid = [x.value for x in node.iter.args]
+        names = [node.target.id]
+        for_loops = build_for_loops(grid, ip, names)
+        ivs = [loop.induction_variable for loop in for_loops]
+        for name, iv in zip(names, ivs):
+            ctx.induction_vars[name] = iv
+        ctx.set_ip(for_loops[-1].body.operations[0])
+        build_stmts(ctx, node.body)
+        ctx.pop_ip()
+
+    @staticmethod
+    def build_grid_for(ctx, node):
+        ip = ctx.get_ip()
         grid = [x.value for x in node.iter.args]
         names = [x.id for x in node.target.elts]
         for_loops = build_for_loops(grid, ip, names)
         ivs = [loop.induction_variable for loop in for_loops]
         for name, iv in zip(names, ivs):
             ctx.induction_vars[name] = iv
-        ctx.ip_stack.append(InsertionPoint(for_loops[-1].body.operations[0]))
+        ctx.set_ip(for_loops[-1].body.operations[0])
         build_stmts(ctx, node.body)
-        ctx.ip_stack.pop()
+        ctx.pop_ip()
+
+    @staticmethod
+    def build_For(ctx, node):
+        if node.orelse:
+            raise RuntimeError("'else' clause for 'for' not supported in HCL kernels")
+        if (
+            isinstance(node.iter, ast.Call)
+            and isinstance(node.iter.func, ast.Name)
+            and node.iter.func.id == "range"
+        ):
+            return ASTTransformer.build_range_for(ctx, node)
+        elif (
+            isinstance(node.iter, ast.Call)
+            and isinstance(node.iter.func, ast.Attribute)
+            and node.iter.func.attr == "grid"
+        ):
+            return ASTTransformer.build_grid_for(ctx, node)
 
     @staticmethod
     def build_BinOp(ctx, node):
@@ -143,7 +183,7 @@ class ASTTransformer(Builder):
             ast.BitAnd: lambda l, r: l & r,
         }.get(type(node.op))
         # FIXME
-        return op(lhs, rhs, ip=ctx.ip_stack[-1])
+        return op(lhs, rhs, ip=ctx.get_ip())
 
     @staticmethod
     def build_AugAssign(ctx, node):
@@ -169,7 +209,7 @@ class ASTTransformer(Builder):
             ast.BitXor: lambda l, r: l ^ r,
             ast.BitAnd: lambda l, r: l & r,
         }.get(type(node.op))
-        ip = ctx.ip_stack[-1]
+        ip = ctx.get_ip()
         res = op(lhs, rhs, ip=ip)
         # Store LHS
         build_stmt(ctx, node.target)
@@ -199,7 +239,7 @@ class ASTTransformer(Builder):
         index_exprs = []
         for index in range(dim_count):
             index_exprs.append(AffineExpr.get_dim(index))
-        ip = ctx.ip_stack[-1]
+        ip = ctx.get_ip()
         if isinstance(node.ctx, ast.Load):
             affine_map = AffineMap.get(
                 dim_count=dim_count, symbol_count=0, exprs=index_exprs
@@ -213,7 +253,7 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_FunctionDef(ctx, node):
-        ip = ctx.ip_stack[-1]
+        ip = ctx.get_ip()
         filename, lineno = get_src_loc()
         loc = Location.file(filename, lineno, 0)
         input_types = []
@@ -243,7 +283,7 @@ class ASTTransformer(Builder):
         func_op.add_entry_block()
         for name, arg in zip(arg_names, func_op.arguments):
             ctx.buffers[name] = arg
-        ctx.ip_stack.append(InsertionPoint(func_op.entry_block))
+        ctx.set_ip(func_op.entry_block)
         build_stmts(ctx, node.body)
         ctx.top_func = func_op
 
@@ -261,7 +301,7 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Return(ctx, node):
-        ip = ctx.ip_stack[-1]
+        ip = ctx.pop_ip()
         func_d.ReturnOp([ctx.buffers[node.value.id]], ip=ip)
         return
 

@@ -81,18 +81,24 @@ class Schedule:
 
 
 def customize(fn):
+    # Get Python AST
     file = getsourcefile(fn)
     src, start_lineno = getsourcelines(fn)
     src = [textwrap.fill(line, tabsize=4, width=9999) for line in src]
     src = textwrap.dedent("\n".join(src))
     print(src)
     tree = ast.parse(src)
+    print(ast.dump(tree))
+    # Create MLIR module
     set_context()
     with get_context() as mlir_ctx, get_location():
         hcl_d.register_dialect(mlir_ctx)
         module = Module.create()
-    ctx = ASTContext()
-    ctx.ip_stack.append(InsertionPoint(module.body))
+    # Start building IR
+    global_vars = _get_global_vars(fn)
+    print(global_vars)
+    ctx = ASTContext(global_vars=global_vars)
+    ctx.set_ip(module.body)
     ret = ASTTransformer()(ctx, tree)
     return Schedule(
         module,
