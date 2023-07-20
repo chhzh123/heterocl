@@ -8,6 +8,7 @@ from hcl_mlir.ir import (
     MemRefType,
     StringAttr,
     AffineExpr,
+    AffineConstantExpr,
     AffineMap,
     AffineMapAttr,
 )
@@ -68,7 +69,7 @@ class ASTContext:
 class ASTTransformer(Builder):
     @staticmethod
     def build_Name(ctx, node):
-        return
+        return ctx.buffers[node.id]
 
     @staticmethod
     def build_AnnAssign(ctx, node):
@@ -76,17 +77,25 @@ class ASTTransformer(Builder):
         filename, lineno = get_src_loc()
         loc = Location.file(filename, lineno, 0)
         type_hint = node.annotation
-        type_str = type_hint.value.id
-        shape = [x.value for x in type_hint.slice.value.elts]
-        ele_type = get_mlir_type(type_str)
-        memref_type = MemRefType.get(shape, ele_type)
-        alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
-        alloc_op.attributes["name"] = StringAttr.get(node.target.id)
-        ctx.buffers[node.target.id] = alloc_op.result
-
-    @staticmethod
-    def build_Assign(ctx, node):
-        build_stmt(ctx, node.value)
+        if isinstance(type_hint, ast.Subscript):
+            type_str = type_hint.value.id
+            shape = [x.value for x in type_hint.slice.value.elts]
+            ele_type = get_mlir_type(type_str)
+            memref_type = MemRefType.get(shape, ele_type)
+            alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
+            alloc_op.attributes["name"] = StringAttr.get(node.target.id)
+            ctx.buffers[node.target.id] = alloc_op.result
+        elif isinstance(type_hint, ast.Name):
+            type_str = type_hint.id
+            # TODO: figure out why zero-shape cannot work
+            shape = (1,)
+            ele_type = get_mlir_type(type_str)
+            memref_type = MemRefType.get(shape, ele_type)
+            alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
+            alloc_op.attributes["name"] = StringAttr.get(node.target.id)
+            ctx.buffers[node.target.id] = alloc_op.result
+        else:
+            raise RuntimeError("Unsupported AnnAssign")
 
     @staticmethod
     def build_Attribute(ctx, node):
@@ -162,6 +171,8 @@ class ASTTransformer(Builder):
             and node.iter.func.attr == "grid"
         ):
             return ASTTransformer.build_grid_for(ctx, node)
+        else:
+            raise RuntimeError("Unsupported for loop")
 
     @staticmethod
     def build_BinOp(ctx, node):
@@ -186,13 +197,77 @@ class ASTTransformer(Builder):
         return op(lhs, rhs, ip=ctx.get_ip())
 
     @staticmethod
+    def build_store(ctx, node, val):
+        ip = ctx.get_ip()
+        if isinstance(node, ast.Subscript):
+            dim_count = len(node.slice.value.elts)
+            index_exprs = []
+            for index in range(dim_count):
+                index_exprs.append(AffineExpr.get_dim(index))
+            affine_map = AffineMap.get(
+                dim_count=dim_count, symbol_count=0, exprs=index_exprs
+            )
+            affine_attr = AffineMapAttr.get(affine_map)
+            ivs = [ctx.induction_vars[x.id] for x in node.slice.value.elts]
+            store_op = affine_d.AffineStoreOp(
+                val, ctx.buffers[node.value.id], ivs, affine_attr, ip=ip
+            )
+            store_op.attributes["to"] = StringAttr.get(node.value.id)
+        elif isinstance(node, ast.Name):  # scalar
+            affine_map = AffineMap.get(
+                dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
+            )
+            affine_attr = AffineMapAttr.get(affine_map)
+            store_op = affine_d.AffineStoreOp(
+                val, ctx.buffers[node.id], [], affine_attr, ip=ip
+            )
+            store_op.attributes["to"] = StringAttr.get(node.id)
+        else:
+            raise RuntimeError("Unsupported store")
+
+    @staticmethod
+    def build_Assign(ctx, node):
+        # Compute RHS
+        ip = ctx.get_ip()
+        if isinstance(node.value, ast.Name):
+            affine_map = AffineMap.get(
+                dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
+            )
+            affine_attr = AffineMapAttr.get(affine_map)
+            load = affine_d.AffineLoadOp(
+                ctx.buffers[node.value.id], [], affine_attr, ip=ip
+            )
+            rhs = load.result
+        else:
+            rhs = build_stmt(ctx, node.value)
+        if len(node.targets) > 1:
+            raise RuntimeError("Cannot assign to multiple targets")
+        # Store LHS
+        store_op = ASTTransformer.build_store(ctx, node.targets[0], rhs)
+        return store_op
+
+    @staticmethod
     def build_AugAssign(ctx, node):
+        ip = ctx.get_ip()
         # Compute RHS
         rhs = build_stmt(ctx, node.value)
         # Load LHS
-        node.target.ctx = ast.Load()
-        lhs = build_stmt(ctx, node.target)
-        node.target.ctx = ast.Store()
+        if isinstance(node.target, ast.Subscript):
+            node.target.ctx = ast.Load()
+            lhs = build_stmt(ctx, node.target)
+            node.target.ctx = ast.Store()
+            lhs.attributes["to"] = StringAttr.get(node.target.value.id)
+        elif isinstance(node.target, ast.Name):  # scalar
+            affine_map = AffineMap.get(
+                dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
+            )
+            affine_attr = AffineMapAttr.get(affine_map)
+            lhs = affine_d.AffineLoadOp(
+                ctx.buffers[node.target.id], [], affine_attr, ip=ip
+            )
+            lhs.attributes["from"] = StringAttr.get(node.target.id)
+        else:
+            raise RuntimeError("Unsupported AugAssign")
         # Aug LHS
         op = {
             ast.Add: arith_d.AddIOp,
@@ -209,22 +284,9 @@ class ASTTransformer(Builder):
             ast.BitXor: lambda l, r: l ^ r,
             ast.BitAnd: lambda l, r: l & r,
         }.get(type(node.op))
-        ip = ctx.get_ip()
         res = op(lhs, rhs, ip=ip)
         # Store LHS
-        build_stmt(ctx, node.target)
-        dim_count = len(node.target.slice.value.elts)
-        index_exprs = []
-        for index in range(dim_count):
-            index_exprs.append(AffineExpr.get_dim(index))
-        affine_map = AffineMap.get(
-            dim_count=dim_count, symbol_count=0, exprs=index_exprs
-        )
-        affine_attr = AffineMapAttr.get(affine_map)
-        ivs = [ctx.induction_vars[x.id] for x in node.target.slice.value.elts]
-        store_op = affine_d.AffineStoreOp(
-            res.result, ctx.buffers[node.target.value.id], ivs, affine_attr, ip=ip
-        )
+        store_op = ASTTransformer.build_store(ctx, node.target, res.result)
         return store_op
 
     @staticmethod
@@ -250,6 +312,8 @@ class ASTTransformer(Builder):
                 ctx.buffers[node.value.id], ivs, affine_attr, ip=ip
             )
             return load_op
+        else:
+            raise RuntimeError("Unsupported Subscript")
 
     @staticmethod
     def build_FunctionDef(ctx, node):
