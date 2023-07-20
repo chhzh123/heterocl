@@ -66,6 +66,15 @@ class ASTContext:
         return self.ip_stack.pop()
 
 
+class MockArg:
+    def __init__(self, arg):
+        self.arg = arg
+
+    @property
+    def result(self):
+        return self.arg
+
+
 class ASTTransformer(Builder):
     @staticmethod
     def build_Name(ctx, node):
@@ -84,7 +93,7 @@ class ASTTransformer(Builder):
             memref_type = MemRefType.get(shape, ele_type)
             alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
             alloc_op.attributes["name"] = StringAttr.get(node.target.id)
-            ctx.buffers[node.target.id] = alloc_op.result
+            ctx.buffers[node.target.id] = alloc_op
         elif isinstance(type_hint, ast.Name):
             type_str = type_hint.id
             # TODO: figure out why zero-shape cannot work
@@ -93,7 +102,7 @@ class ASTTransformer(Builder):
             memref_type = MemRefType.get(shape, ele_type)
             alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
             alloc_op.attributes["name"] = StringAttr.get(node.target.id)
-            ctx.buffers[node.target.id] = alloc_op.result
+            ctx.buffers[node.target.id] = alloc_op
         else:
             raise RuntimeError("Unsupported AnnAssign")
 
@@ -210,7 +219,7 @@ class ASTTransformer(Builder):
             affine_attr = AffineMapAttr.get(affine_map)
             ivs = [ctx.induction_vars[x.id] for x in node.slice.value.elts]
             store_op = affine_d.AffineStoreOp(
-                val, ctx.buffers[node.value.id], ivs, affine_attr, ip=ip
+                val.result, ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
             )
             store_op.attributes["to"] = StringAttr.get(node.value.id)
         elif isinstance(node, ast.Name):  # scalar
@@ -219,7 +228,7 @@ class ASTTransformer(Builder):
             )
             affine_attr = AffineMapAttr.get(affine_map)
             store_op = affine_d.AffineStoreOp(
-                val, ctx.buffers[node.id], [], affine_attr, ip=ip
+                val.result, ctx.buffers[node.id].result, [], affine_attr, ip=ip
             )
             store_op.attributes["to"] = StringAttr.get(node.id)
         else:
@@ -235,9 +244,9 @@ class ASTTransformer(Builder):
             )
             affine_attr = AffineMapAttr.get(affine_map)
             load = affine_d.AffineLoadOp(
-                ctx.buffers[node.value.id], [], affine_attr, ip=ip
+                ctx.buffers[node.value.id].result, [], affine_attr, ip=ip
             )
-            rhs = load.result
+            rhs = load
         else:
             rhs = build_stmt(ctx, node.value)
         if len(node.targets) > 1:
@@ -263,7 +272,7 @@ class ASTTransformer(Builder):
             )
             affine_attr = AffineMapAttr.get(affine_map)
             lhs = affine_d.AffineLoadOp(
-                ctx.buffers[node.target.id], [], affine_attr, ip=ip
+                ctx.buffers[node.target.id].result, [], affine_attr, ip=ip
             )
             lhs.attributes["from"] = StringAttr.get(node.target.id)
         else:
@@ -286,7 +295,7 @@ class ASTTransformer(Builder):
         }.get(type(node.op))
         res = op(lhs, rhs, ip=ip)
         # Store LHS
-        store_op = ASTTransformer.build_store(ctx, node.target, res.result)
+        store_op = ASTTransformer.build_store(ctx, node.target, res)
         return store_op
 
     @staticmethod
@@ -309,7 +318,7 @@ class ASTTransformer(Builder):
             affine_attr = AffineMapAttr.get(affine_map)
             ivs = [ctx.induction_vars[x.id] for x in node.slice.value.elts]
             load_op = affine_d.AffineLoadOp(
-                ctx.buffers[node.value.id], ivs, affine_attr, ip=ip
+                ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
             )
             return load_op
         else:
@@ -346,7 +355,7 @@ class ASTTransformer(Builder):
         # func_op.attributes["sym_visibility"] = StringAttr.get("private")
         func_op.add_entry_block()
         for name, arg in zip(arg_names, func_op.arguments):
-            ctx.buffers[name] = arg
+            ctx.buffers[name] = MockArg(arg)
         ctx.set_ip(func_op.entry_block)
         build_stmts(ctx, node.body)
         ctx.top_func = func_op
@@ -366,7 +375,7 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_Return(ctx, node):
         ip = ctx.pop_ip()
-        func_d.ReturnOp([ctx.buffers[node.value.id]], ip=ip)
+        func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ip)
         return
 
 
