@@ -88,9 +88,27 @@ def test_nested_if():
     print(s.module)
 
 
-# test_gemm_grid_for()
-# test_gemm_range_for()
-# test_gemm_reduction_var()
-# test_gemm_float()
-test_nested_if()
+def test_linear():
+    M = 1024
+    N = 1024
+    K = 1024
+
+    def gemm(A: float32[M, K], B: float32[K, N]) -> float32[M, N]:
+        C: float32[M, N] = 0
+        for i, j, k in hcl.grid(M, N, K):
+            C[i, j] += A[i, k] * B[k, j]
+        return C
+
+    s = hcl.customize(gemm)
+    print(s.module)
+
+
+if __name__ == "__main__":
+    # test_gemm_grid_for()
+    # test_gemm_range_for()
+    # test_gemm_reduction_var()
+    # test_gemm_float()
+    # test_nested_if()
+    test_linear()
+
 sys.exit()

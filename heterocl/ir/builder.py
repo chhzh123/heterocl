@@ -26,7 +26,7 @@ from hcl_mlir.dialects import (
 from hcl_mlir import get_mlir_type
 from ..utils import get_src_loc
 from ..context import get_context, get_location
-from ..ir.transform import build_for_loops
+from .transform import build_for_loops
 
 
 def get_extra_type_hints_from_str(dtype):

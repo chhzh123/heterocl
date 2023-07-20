@@ -8,7 +8,7 @@ import ast
 from hcl_mlir.ir import Module, InsertionPoint, StringAttr, IntegerType, IntegerAttr
 from hcl_mlir.dialects import hcl as hcl_d
 
-from .parser.builder import ASTTransformer, ASTContext
+from .ir.builder import ASTTransformer, ASTContext
 from .context import get_context, set_context, get_location
 from .ir.transform import get_loop_band_names
 from .build_module import _mlir_lower_pipeline
