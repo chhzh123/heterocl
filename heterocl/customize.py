@@ -4,9 +4,13 @@
 import inspect
 import textwrap
 import ast
+from dataclasses import dataclass
 
 from hcl_mlir.ir import Module, InsertionPoint, StringAttr, IntegerType, IntegerAttr
 from hcl_mlir.dialects import hcl as hcl_d
+from hcl_mlir.exceptions import (
+    HCLValueError,
+)
 
 from .ir.builder import ASTTransformer, ASTContext
 from .context import get_context, set_context, get_location
@@ -40,13 +44,18 @@ def _get_global_vars(_func):
 
 
 def wrapped_apply(fn):
-    def wrapper(*args):
+    def wrapper(*args, **kwargs):
         with get_context(), get_location():
-            fn(*args)
+            fn(*args, **kwargs)
         _mlir_lower_pipeline(args[0].module)
 
     return wrapper
 
+@dataclass
+class Partition:
+    Complete = 0
+    Block = 1
+    Cyclic = 2
 
 class Schedule:
     def __init__(self, module, top_func, ip):
@@ -79,6 +88,34 @@ class Schedule:
         arg_results = [arg.result for arg in loop_hdls]
         hcl_d.ReorderOp(arg_results, ip=self.ip)
 
+    @wrapped_apply
+    def partition(self, target, partition_type=Partition.Complete, dim=0, factor=0):
+        if partition_type > 2:
+            raise HCLValueError("Invalid partition type")
+        if dim < 0:
+            raise HCLValueError("Invalid dimension")
+        if factor < 0:
+            raise HCLValueError("Invalid factor")
+        if partition_type == Partition.Complete:
+            partition_type = 0
+        elif partition_type == Partition.Block:
+            partition_type = 1
+        elif partition_type == Partition.Cyclic:
+            partition_type = 2
+        else:
+            raise HCLValueError("Not supported partition type")
+        i32 = IntegerType.get_signless(32)
+        ui32 = IntegerType.get_unsigned(32)
+        partition_type = IntegerAttr.get(i32, partition_type)
+        dim = IntegerAttr.get(ui32, dim)
+        factor = IntegerAttr.get(ui32, factor)
+        hcl_d.PartitionOp(
+            target.result,
+            partition_kind=partition_type,
+            dim=dim,
+            factor=factor,
+            ip=self.ip,
+        )
 
 def customize(fn):
     # Get Python AST
@@ -99,7 +136,10 @@ def customize(fn):
     print(global_vars)
     ctx = ASTContext(global_vars=global_vars)
     ctx.set_ip(module.body)
-    ret = ASTTransformer()(ctx, tree)
+    ASTTransformer()(ctx, tree)
+    # Attach buffers to function
+    for name, buffer in ctx.buffers.items():
+        setattr(fn, name, buffer)
     return Schedule(
         module,
         ctx.top_func,

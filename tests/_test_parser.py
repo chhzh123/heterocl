@@ -100,6 +100,8 @@ def test_linear():
         return C
 
     s = hcl.customize(gemm)
+    s.reorder("j", "i", "k")
+    s.partition(gemm.A, partition_type=2, dim=2, factor=8)
     print(s.module)
 
 
