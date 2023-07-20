@@ -82,32 +82,6 @@ class ASTTransformer(Builder):
         return ctx.buffers[node.id]
 
     @staticmethod
-    def build_AnnAssign(ctx, node):
-        ip = ctx.get_ip()
-        filename, lineno = get_src_loc()
-        loc = Location.file(filename, lineno, 0)
-        type_hint = node.annotation
-        if isinstance(type_hint, ast.Subscript):
-            type_str = type_hint.value.id
-            shape = [x.value for x in type_hint.slice.value.elts]
-            ele_type = get_mlir_type(type_str)
-            memref_type = MemRefType.get(shape, ele_type)
-            alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
-            alloc_op.attributes["name"] = StringAttr.get(node.target.id)
-            ctx.buffers[node.target.id] = alloc_op
-        elif isinstance(type_hint, ast.Name):
-            type_str = type_hint.id
-            # TODO: figure out why zero-shape cannot work
-            shape = (1,)
-            ele_type = get_mlir_type(type_str)
-            memref_type = MemRefType.get(shape, ele_type)
-            alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
-            alloc_op.attributes["name"] = StringAttr.get(node.target.id)
-            ctx.buffers[node.target.id] = alloc_op
-        else:
-            raise RuntimeError("Unsupported AnnAssign")
-
-    @staticmethod
     def build_Attribute(ctx, node):
         build_stmt(ctx, node.value)
 
@@ -347,6 +321,32 @@ class ASTTransformer(Builder):
             raise RuntimeError("Unsupported Subscript")
 
     @staticmethod
+    def build_AnnAssign(ctx, node):
+        ip = ctx.get_ip()
+        filename, lineno = get_src_loc()
+        loc = Location.file(filename, lineno, 0)
+        type_hint = node.annotation
+        if isinstance(type_hint, ast.Subscript):
+            type_str = type_hint.value.id
+            shape = [x.value for x in type_hint.slice.value.elts]
+            ele_type = get_mlir_type(type_str)
+            memref_type = MemRefType.get(shape, ele_type)
+            alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
+            alloc_op.attributes["name"] = StringAttr.get(node.target.id)
+            ctx.buffers[node.target.id] = alloc_op
+        elif isinstance(type_hint, ast.Name):
+            type_str = type_hint.id
+            # TODO: figure out why zero-shape cannot work
+            shape = (1,)
+            ele_type = get_mlir_type(type_str)
+            memref_type = MemRefType.get(shape, ele_type)
+            alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
+            alloc_op.attributes["name"] = StringAttr.get(node.target.id)
+            ctx.buffers[node.target.id] = alloc_op
+        else:
+            raise RuntimeError("Unsupported AnnAssign")
+
+    @staticmethod
     def build_FunctionDef(ctx, node):
         ip = ctx.get_ip()
         filename, lineno = get_src_loc()
@@ -354,27 +354,38 @@ class ASTTransformer(Builder):
         input_types = []
         input_typehints = []
         arg_names = []
+
+        def build_type(type_hint):
+            if isinstance(type_hint, ast.Subscript):
+                type_str = type_hint.value.id
+                shape = [x.value for x in type_hint.slice.value.elts]
+                ele_type = get_mlir_type(type_str)
+                memref_type = MemRefType.get(shape, ele_type)
+            elif isinstance(type_hint, ast.Name):
+                type_str = type_hint.id
+                memref_type = get_mlir_type(type_str)
+            else:
+                raise RuntimeError("Unsupported function argument type")
+            extra_type_hint = get_extra_type_hints_from_str(type_str)
+            return memref_type, extra_type_hint
+
+        # Build input types
         for arg in node.args.args:
-            type_hint = arg.annotation
-            type_str = type_hint.value.id
-            shape = [x.value for x in type_hint.slice.value.elts]
-            ele_type = get_mlir_type(type_str)
-            input_typehints.append(get_extra_type_hints_from_str(type_str))
-            memref_type = MemRefType.get(shape, ele_type)
-            input_types.append(memref_type)
+            arg_type, extra_type_hint = build_type(arg.annotation)
+            input_types.append(arg_type)
+            input_typehints.append(extra_type_hint)
             arg_names.append(arg.arg)
+
+        # Build return type
         output_types = []
         output_typehints = []
-        type_hint = node.returns
-        type_str = type_hint.value.id
-        shape = [x.value for x in type_hint.slice.value.elts]
-        ele_type = get_mlir_type(type_str)
-        output_typehints.append(get_extra_type_hints_from_str(type_str))
-        memref_type = MemRefType.get(shape, ele_type)
-        output_types.append(memref_type)
+        output_type, extra_type_hint = build_type(node.returns)
+        output_types.append(output_type)
+        output_typehints.append(extra_type_hint)
+
+        # Build function
         func_type = FunctionType.get(input_types, output_types)
         func_op = func_d.FuncOp(name=node.name, type=func_type, ip=ip, loc=loc)
-        # func_op.attributes["sym_visibility"] = StringAttr.get("private")
         func_op.add_entry_block()
         for name, arg in zip(arg_names, func_op.arguments):
             ctx.buffers[name] = MockArg(arg)
