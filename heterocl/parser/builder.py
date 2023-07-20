@@ -18,6 +18,7 @@ from hcl_mlir.dialects import (
     memref as memref_d,
     affine as affine_d,
     arith as arith_d,
+    math as math_d,
 )
 from hcl_mlir import get_mlir_type
 from ..utils import get_src_loc
@@ -201,16 +202,28 @@ class ASTTransformer(Builder):
                 "int": arith_d.MulIOp,
                 "fixed": hcl_d.MulFixedOp,
             },
-            # FIXME
-            ast.Div: lambda l, r: l / r,
-            ast.FloorDiv: lambda l, r: l // r,
-            ast.Mod: lambda l, r: l % r,
-            ast.Pow: lambda l, r: l**r,
-            ast.LShift: lambda l, r: l << r,
-            ast.RShift: lambda l, r: l >> r,
-            ast.BitOr: lambda l, r: l | r,
-            ast.BitXor: lambda l, r: l ^ r,
-            ast.BitAnd: lambda l, r: l & r,
+            ast.Div: {
+                "float": arith_d.DivFOp,
+                "int": arith_d.DivSIOp,
+                "uint": arith_d.DivUIOp,
+                "fixed": hcl_d.DivFixedOp,
+            },
+            ast.FloorDiv: {
+                "float": arith_d.DivFOp,
+                "int": arith_d.DivSIOp,
+                "uint": arith_d.DivUIOp,
+            },
+            ast.Mod: {
+                "float": arith_d.RemFOp,
+                "int": arith_d.RemSIOp,
+                "uint": arith_d.RemUIOp,
+            },
+            ast.Pow: math_d.PowFOp,
+            ast.LShift: arith_d.ShLIOp,
+            ast.RShift: arith_d.ShRUIOp,
+            ast.BitOr: arith_d.OrIOp,
+            ast.BitXor: arith_d.XOrIOp,
+            ast.BitAnd: arith_d.AndIOp,
         }.get(type(node.op))
         dtype = str(lhs.result.type)
         if dtype.startswith("i"):
