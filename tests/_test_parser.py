@@ -1,6 +1,6 @@
 import sys
 import heterocl as hcl
-from heterocl.ir.types import int32, float32
+from heterocl.ir.types import int1, int32, float32
 
 
 def test_gemm_grid_for():
@@ -171,6 +171,26 @@ def test_conv2D():
     assert np.array_equal(np_B, np_C)
 
 
+def test_bconv2D_nchw():
+    bs = 4
+    ic, oc = 6, 16
+    ih, iw = 8, 8
+    kh, kw = 3, 3
+    oh, ow = ih - kh + 1, iw - kw + 1
+
+    def bconv(
+        A: int1[bs, ic, ih, iw], F: int1[oc, ic, kh, kw]
+    ) -> int32[bs, oc, oh, ow]:
+        B: int32[bs, oc, oh, ow] = 0
+        for n, c, h, w in hcl.grid(bs, oc, oh, ow):
+            for rc, rh, rw in hcl.reduction(ic, kh, kw):
+                B[n, c, h, w] += A[n, rc, h + rh, w + rw] ^ F[c, rc, rh, rw]
+        return B
+
+    s = hcl.customize(bconv)
+    print(s.module)
+
+
 if __name__ == "__main__":
     # test_gemm_grid_for()
     # test_gemm_range_for()
@@ -180,6 +200,7 @@ if __name__ == "__main__":
     # test_interleaving_acc()
     # test_buffer_at()
     # test_platform()
-    test_conv2D()
+    # test_conv2D()
+    test_bconv2D_nchw()
 
 sys.exit()

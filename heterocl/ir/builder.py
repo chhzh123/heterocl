@@ -210,12 +210,36 @@ class ASTTransformer(Builder):
                 "int": arith_d.RemSIOp,
                 "uint": arith_d.RemUIOp,
             },
-            ast.Pow: math_d.PowFOp,
-            ast.LShift: arith_d.ShLIOp,
-            ast.RShift: arith_d.ShRUIOp,
-            ast.BitOr: arith_d.OrIOp,
-            ast.BitXor: arith_d.XOrIOp,
-            ast.BitAnd: arith_d.AndIOp,
+            ast.Pow: {
+                "float": math_d.PowFOp,
+                "int": RuntimeError,
+                "uint": RuntimeError,
+            },
+            ast.LShift: {
+                "float": RuntimeError,
+                "int": arith_d.ShLIOp,
+                "uint": RuntimeError,
+            },
+            ast.RShift: {
+                "float": RuntimeError,
+                "int": arith_d.ShRUIOp,
+                "uint": RuntimeError,
+            },
+            ast.BitOr: {
+                "float": RuntimeError,
+                "int": arith_d.OrIOp,
+                "uint": RuntimeError,
+            },
+            ast.BitXor: {
+                "float": RuntimeError,
+                "int": arith_d.XOrIOp,
+                "uint": RuntimeError,
+            },
+            ast.BitAnd: {
+                "float": RuntimeError,
+                "int": arith_d.AndIOp,
+                "uint": RuntimeError,
+            },
         }.get(type(node.op))
         dtype = str(lhs.result.type)
         if dtype.startswith("i"):
