@@ -95,15 +95,16 @@ def test_linear():
 
     def gemm(A: float32[M, K], B: float32[K, N]) -> float32[M, N]:
         C: float32[M, N] = 0
-        for i, j, k in hcl.grid(M, N, K):
-            C[i, j] += A[i, k] * B[k, j]
+        for i, j in hcl.grid(M, N):
+            for k in hcl.reduction(K):
+                C[i, j] += A[i, k] * B[k, j]
         return C
 
     s = hcl.customize(gemm)
-    s.reorder("j", "i", "k")
+    # s.reorder("j", "i", "k")
     print(s.module)
-    s.buffer_at(gemm.C, axis="j")
-    s.partition(gemm.A, partition_type=2, dim=2, factor=8)
+    s.buffer_at(gemm.C, axis="i")
+    # s.partition(gemm.A, partition_type=2, dim=2, factor=8)
     print(s.module)
 
 
@@ -122,12 +123,12 @@ def test_buffer_at():
 
 
 if __name__ == "__main__":
-    # test_gemm_grid_for()
-    # test_gemm_range_for()
-    # test_gemm_reduction_var()
-    # test_gemm_float()
-    # test_nested_if()
-    # test_linear()
+    test_gemm_grid_for()
+    test_gemm_range_for()
+    test_gemm_reduction_var()
+    test_gemm_float()
+    test_nested_if()
+    test_linear()
     test_buffer_at()
 
 sys.exit()

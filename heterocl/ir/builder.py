@@ -8,6 +8,7 @@ from hcl_mlir.ir import (
     MemRefType,
     IntegerType,
     F32Type,
+    UnitAttr,
     IntegerAttr,
     FloatAttr,
     StringAttr,
@@ -110,36 +111,8 @@ class ASTTransformer(Builder):
         return ctx.buffers[node.id]
 
     @staticmethod
-    def build_Attribute(ctx, node):
-        build_stmt(ctx, node.value)
-
-    @staticmethod
     def build_Constant(ctx, node):
         return MockConstant(node.value, ctx)
-
-    @staticmethod
-    def build_keyword(ctx, node):
-        build_stmt(ctx, node.value)
-        return node
-
-    @staticmethod
-    def build_Tuple(ctx, node):
-        build_stmts(ctx, node.elts)
-        return node
-
-    @staticmethod
-    def build_Subscript(ctx, node):
-        build_stmt(ctx, node.value)
-        build_stmt(ctx, node.slice)
-
-    @staticmethod
-    def build_Index(ctx, node):
-        build_stmt(ctx, node.value)
-
-    @staticmethod
-    def build_Lambda(ctx, node):
-        build_stmt(ctx, node.body)
-        return node
 
     @staticmethod
     def build_range_for(ctx, node):
@@ -165,13 +138,20 @@ class ASTTransformer(Builder):
             x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
             for x in node.iter.args
         ]
-        names = [x.id for x in node.target.elts]
+        if isinstance(node.target, ast.Tuple):
+            names = [x.id for x in node.target.elts]
+        else:
+            names = [node.target.id]
         for_loops = build_for_loops(grid, ip, names)
         ivs = [loop.induction_variable for loop in for_loops]
         for name, iv in zip(names, ivs):
             ctx.induction_vars[name] = iv
+            ctx.buffers[name] = MockArg(iv)
         ctx.set_ip(for_loops[-1].body.operations[0])
         build_stmts(ctx, node.body)
+        if node.iter.func.attr == "reduction":
+            for loop in for_loops:
+                loop.attributes["reduction"] = UnitAttr.get()
         ctx.pop_ip()
 
     @staticmethod
@@ -187,7 +167,7 @@ class ASTTransformer(Builder):
         elif (
             isinstance(node.iter, ast.Call)
             and isinstance(node.iter.func, ast.Attribute)
-            and node.iter.func.attr == "grid"
+            and (node.iter.func.attr == "grid" or node.iter.func.attr == "reduction")
         ):
             return ASTTransformer.build_grid_for(ctx, node)
         else:
