@@ -133,7 +133,7 @@ def test_buffer_at():
 
 
 def test_conv2D_lb():
-    def top(A: int32[10, 10]) -> int32[8, 8]:
+    def conv2D(A: int32[10, 10]) -> int32[8, 8]:
         B: int32[8, 8] = 0
         for i, j in hcl.grid(8, 8):
             v: int32 = 0
@@ -142,14 +142,14 @@ def test_conv2D_lb():
             B[i, j] = v
         return B
 
-    s = hcl.customize(top)
-    # s.reuse_at(conv2D.A, axis="i")
+    s = hcl.customize(conv2D)
+    s.reuse_at(conv2D.A, axis="i")
     print(s.module)
     mod = s.build()
-    print(s.module)
 
     # testing
     import numpy as np
+
     np_A = np.random.randint(0, 10, size=(10, 10))
     np_B = np.zeros((8, 8), dtype="int")
     np_C = np.zeros((8, 8), dtype="int")
@@ -160,12 +160,8 @@ def test_conv2D_lb():
                 for c in range(0, 3):
                     np_C[y][x] += np_A[y + r][x + c]
 
-    hcl_A = hcl.asarray(np_A)
-    hcl_B = hcl.asarray(np_B)
+    mod(np_A, np_B)
 
-    mod(hcl_A, hcl_B)
-
-    np_B = hcl_B.asnumpy()
     assert np.array_equal(np_B, np_C)
 
 
