@@ -17,6 +17,7 @@ from hcl_mlir.ir import (
     MemRefType,
 )
 from hcl_mlir.dialects import hcl as hcl_d
+from hcl_mlir.dialects import memref as memref_d
 from hcl_mlir.exceptions import (
     HCLValueError,
 )
@@ -57,8 +58,9 @@ def _get_global_vars(_func):
 def wrapped_apply(fn):
     def wrapper(*args, **kwargs):
         with get_context(), get_location():
-            fn(*args, **kwargs)
+            res = fn(*args, **kwargs)
         _mlir_lower_pipeline(args[0].module)
+        return res
 
     return wrapper
 
@@ -162,7 +164,29 @@ class Schedule:
             op_hdl.result, StringAttr.get(axis), ip=self.ip
         )
         memref_type = MemRefType.get((1,), F32Type.get())
+
+        def find_reuse_buffers(res):
+            for op in self.top_func.entry_block.operations:
+                if (
+                    isinstance(op, memref_d.AllocOp)
+                    and "name" in op.attributes
+                    and StringAttr(band_name).value + "_reuse"
+                    in StringAttr(op.attributes["name"]).value
+                ):
+                    res.append(op)
+
+        prev_reuse_buffers = []
+        find_reuse_buffers(prev_reuse_buffers)
         hcl_d.ReuseAtOp(memref_type, target.result, loop_hdl.result, ip=self.ip)
+        _mlir_lower_pipeline(self.module)
+        new_reuse_buffers = []
+        find_reuse_buffers(new_reuse_buffers)
+        new_reuse_buffers = [
+            buf for buf in new_reuse_buffers if buf not in prev_reuse_buffers
+        ]
+        if len(new_reuse_buffers) != 1:
+            raise RuntimeError("Reuse buffer not found")
+        return new_reuse_buffers[0]
 
     def build(self, target=None):
         if target is None:
@@ -208,7 +232,6 @@ def customize(fn):
         module = Module.create()
     # Start building IR
     global_vars = _get_global_vars(fn)
-    print(global_vars)
     ctx = ASTContext(global_vars=global_vars)
     ctx.set_ip(module.body)
     ASTTransformer()(ctx, tree)

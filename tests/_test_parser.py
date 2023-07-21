@@ -143,7 +143,8 @@ def test_conv2D_lb():
         return B
 
     s = hcl.customize(conv2D)
-    s.reuse_at(conv2D.A, axis="i")
+    LB = s.reuse_at(conv2D.A, axis="i")
+    s.reuse_at(LB, axis="j")
     print(s.module)
     mod = s.build()
 
