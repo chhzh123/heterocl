@@ -297,8 +297,8 @@ def build_llvm(schedule, top_func_name="top"):
         if func is None:
             raise APIError("No top-level function found in the built MLIR module")
         func.attributes["llvm.emit_c_interface"] = UnitAttr.get()
-        func.attributes[top_func_name] = UnitAttr.get()
-        func.attributes["sym_name"] = StringAttr.get("top")
+        func.attributes["top"] = UnitAttr.get()
+        func.attributes["sym_name"] = StringAttr.get(top_func_name)
 
     with get_context() as ctx, get_location():
         if isinstance(schedule, Schedule):

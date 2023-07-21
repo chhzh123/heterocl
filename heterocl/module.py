@@ -15,7 +15,7 @@ from .devices import Platform
 from .report import report_stats
 from .runtime import execute_fpga_backend, execute_llvm_backend
 from .utils import hcl_dtype_to_mlir
-from .operation import asarray
+from .operation import asarray, Array
 
 
 class HCLModule:
@@ -32,7 +32,7 @@ class HCLModule:
         report = self.report()
         report.display()
 
-    def __call__(self, *argv):
+    def __call__(self, *orig_argv):
         if "target" not in self.__dict__:
             raise APIError("No attached target!")
         if "name" not in self.__dict__:
@@ -45,15 +45,17 @@ class HCLModule:
             self.run_hls(shell=True)
         elif target == "llvm":
             # convert python immediate to heterocl tensor
-            argv = list(argv)
+            argv = list(orig_argv)
             for i, arg in enumerate(argv):
                 if isinstance(arg, (int, float)):
                     np_array = np.array([arg], dtype=type(arg))
                     argv[i] = asarray(np_array)
+                elif not isinstance(arg, Array):
+                    argv[i] = asarray(arg)
             original_results = []
             with get_context(), get_location():
                 for op in self.host_src.body.operations:
-                    if isinstance(op, func_d.FuncOp) and op.sym_name.value == "top":
+                    if isinstance(op, func_d.FuncOp) and op.sym_name.value == self.name:
                         # check if enough args are provided
                         correct_arg_num = len(op.arguments) + len(op.type.results)
                         if len(argv) != correct_arg_num:
@@ -111,6 +113,10 @@ class HCLModule:
                                     argv[len(op.arguments) + i].np_array, pad_shape
                                 )
             execute_llvm_backend(self.src, self.name, self.return_num, *argv)
+            for i, orig_arg in enumerate(orig_argv):
+                if isinstance(orig_arg, np.ndarray):
+                    orig_argv[i][:] = argv[i].asnumpy()[:]
+            # Used for auto-padding
             for res, shape in original_results:
                 slicing = []
                 for s in shape:
