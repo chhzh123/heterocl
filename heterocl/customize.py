@@ -6,7 +6,15 @@ import textwrap
 import ast
 from dataclasses import dataclass
 
-from hcl_mlir.ir import Module, InsertionPoint, StringAttr, IntegerType, IntegerAttr
+from hcl_mlir.ir import (
+    Module,
+    InsertionPoint,
+    StringAttr,
+    IntegerType,
+    IntegerAttr,
+    F32Type,
+    MemRefType,
+)
 from hcl_mlir.dialects import hcl as hcl_d
 from hcl_mlir.exceptions import (
     HCLValueError,
@@ -51,11 +59,13 @@ def wrapped_apply(fn):
 
     return wrapper
 
+
 @dataclass
 class Partition:
     Complete = 0
     Block = 1
     Cyclic = 2
+
 
 class Schedule:
     def __init__(self, module, top_func, ip):
@@ -116,6 +126,17 @@ class Schedule:
             factor=factor,
             ip=self.ip,
         )
+
+    @wrapped_apply
+    def buffer_at(self, target, axis: str):
+        band_name = get_loop_band_names(self.top_func)[0]
+        op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
+        loop_hdl = hcl_d.CreateLoopHandleOp(
+            op_hdl.result, StringAttr.get(axis), ip=self.ip
+        )
+        memref_type = MemRefType.get((1024,), F32Type.get())
+        hcl_d.BufferAtOp(memref_type, target.result, loop_hdl.result, ip=self.ip)
+
 
 def customize(fn):
     # Get Python AST

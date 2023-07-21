@@ -7,7 +7,9 @@ from hcl_mlir.ir import (
     FunctionType,
     MemRefType,
     IntegerType,
+    F32Type,
     IntegerAttr,
+    FloatAttr,
     StringAttr,
     AffineExpr,
     AffineConstantExpr,
@@ -70,16 +72,21 @@ class ASTContext:
         return self.ip_stack.pop()
 
 
-class MockArg:
-    def __init__(self, arg):
-        self.arg = arg
+class MockOp:
+    def __init__(self):
+        pass
+
+
+class MockArg(MockOp):
+    def __init__(self, val):
+        self.val = val
 
     @property
     def result(self):
-        return self.arg
+        return self.val
 
 
-class MockConstant:
+class MockConstant(MockOp):
     def __init__(self, val, ctx):
         self.val = val
         self.ctx = ctx
@@ -87,8 +94,12 @@ class MockConstant:
     @property
     def result(self):
         # TODO: Support other types
-        dtype = IntegerType.get_signless(32)
-        value_attr = IntegerAttr.get(dtype, self.val)
+        if isinstance(self.val, int):
+            dtype = IntegerType.get_signless(32)
+            value_attr = IntegerAttr.get(dtype, self.val)
+        else:
+            dtype = F32Type.get()
+            value_attr = FloatAttr.get(dtype, self.val)
         const_op = arith_d.ConstantOp(dtype, value_attr, ip=self.ctx.get_ip())
         return const_op.result
 
@@ -232,7 +243,7 @@ class ASTTransformer(Builder):
             op = opcls["float"]
         else:
             raise RuntimeError("Unsupported types for binary op: {}".format(dtype))
-        return op(lhs, rhs, ip=ctx.get_ip())
+        return op(lhs.result, rhs.result, ip=ctx.get_ip())
 
     @staticmethod
     def build_BinOp(ctx, node):

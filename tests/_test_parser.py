@@ -101,7 +101,23 @@ def test_linear():
 
     s = hcl.customize(gemm)
     s.reorder("j", "i", "k")
+    print(s.module)
+    s.buffer_at(gemm.C, axis="j")
     s.partition(gemm.A, partition_type=2, dim=2, factor=8)
+    print(s.module)
+
+
+def test_buffer_at():
+    M, N = 1024, 1024
+
+    def gemm(A: float32[M, N]) -> float32[M, N]:
+        B: float32[M, N] = 0
+        for i, j in hcl.grid(M, N):
+            B[i, j] = A[i, j] + 1.0
+        return B
+
+    s = hcl.customize(gemm)
+    s.buffer_at(gemm.B, axis="i")
     print(s.module)
 
 
@@ -111,6 +127,7 @@ if __name__ == "__main__":
     # test_gemm_reduction_var()
     # test_gemm_float()
     # test_nested_if()
-    test_linear()
+    # test_linear()
+    test_buffer_at()
 
 sys.exit()
