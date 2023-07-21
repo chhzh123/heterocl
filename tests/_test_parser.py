@@ -132,7 +132,7 @@ def test_buffer_at():
     print(s.module)
 
 
-def test_conv2D_lb():
+def test_conv2D():
     def conv2D(A: int32[10, 10]) -> int32[8, 8]:
         B: int32[8, 8] = 0
         for i, j in hcl.grid(8, 8):
@@ -143,8 +143,13 @@ def test_conv2D_lb():
         return B
 
     s = hcl.customize(conv2D)
+    s.split("j", 4)
+    s.reorder("j.outer", "i", "j.inner")
     LB = s.reuse_at(conv2D.A, axis="i")
-    s.reuse_at(LB, axis="j")
+    WB = s.reuse_at(LB, axis="j.inner")
+    s.partition(LB, dim=2)
+    s.partition(WB)
+    s.pipeline("i")
     print(s.module)
     mod = s.build()
 
@@ -175,6 +180,6 @@ if __name__ == "__main__":
     # test_interleaving_acc()
     # test_buffer_at()
     # test_platform()
-    test_conv2D_lb()
+    test_conv2D()
 
 sys.exit()

@@ -29,9 +29,12 @@ from .ast.build_cleaner import ASTCleaner
 from .ast import ast
 
 
-def _mlir_lower_pipeline(module):
+def _mlir_lower_pipeline(module, **kwargs):
     hcl_d.loop_transformation(module)
-    pipeline = "func.func(affine-loop-normalize, cse, affine-simplify-structures, canonicalize)"
+    passes = ["affine-loop-normalize", "cse", "affine-simplify-structures"]
+    if "canonicalize" in kwargs:
+        passes += ["canonicalize"]
+    pipeline = f'func.func({",".join(passes)})'
     try:
         with get_context():
             mlir_pass_manager.parse(pipeline).run(module)
