@@ -88,7 +88,8 @@ def test_nested_if():
     print(s.module)
 
 
-def test_linear():
+def test_interleaving_acc():
+    # https://github.com/cornell-zhang/hcl-dialect/blob/v0.1/test/Transforms/memory/buffer_gemm.mlir#L86
     M = 1024
     N = 1024
     K = 1024
@@ -101,11 +102,20 @@ def test_linear():
         return C
 
     s = hcl.customize(gemm)
-    # s.reorder("j", "i", "k")
-    print(s.module)
+    s.reorder("k", "j")
     s.buffer_at(gemm.C, axis="i")
-    # s.partition(gemm.A, partition_type=2, dim=2, factor=8)
+    s.pipeline("j")
     print(s.module)
+    print(s.build(target="vhls"))
+    return s
+
+
+def test_platform():
+    s = test_interleaving_acc()
+    target = hcl.Platform.xilinx_zc706
+    target.config(compiler="vivado_hls", mode="debug", project="gemm-inter-acc.prj")
+    mod = s.build(target=target)
+    mod()
 
 
 def test_buffer_at():
@@ -123,12 +133,13 @@ def test_buffer_at():
 
 
 if __name__ == "__main__":
-    test_gemm_grid_for()
-    test_gemm_range_for()
-    test_gemm_reduction_var()
-    test_gemm_float()
-    test_nested_if()
-    test_linear()
-    test_buffer_at()
+    # test_gemm_grid_for()
+    # test_gemm_range_for()
+    # test_gemm_reduction_var()
+    # test_gemm_float()
+    # test_nested_if()
+    # test_interleaving_acc()
+    # test_buffer_at()
+    test_platform()
 
 sys.exit()
