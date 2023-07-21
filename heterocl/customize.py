@@ -1,6 +1,7 @@
 # Copyright HeteroCL authors. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import io
 import inspect
 import textwrap
 import ast
@@ -24,6 +25,8 @@ from .ir.builder import ASTTransformer, ASTContext
 from .context import get_context, set_context, get_location
 from .ir.transform import get_loop_band_names
 from .build_module import _mlir_lower_pipeline
+from .runtime import copy_build_files
+from .module import HCLModule
 
 
 def getsourcefile(obj):
@@ -136,6 +139,41 @@ class Schedule:
         )
         memref_type = MemRefType.get((1024,), F32Type.get())
         hcl_d.BufferAtOp(memref_type, target.result, loop_hdl.result, ip=self.ip)
+
+    @wrapped_apply
+    def pipeline(self, axis, initiation_interval=1):
+        i32 = IntegerType.get_unsigned(32)
+        ii = IntegerAttr.get(i32, initiation_interval)
+        band_name = get_loop_band_names(self.top_func)[0]
+        op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
+        loop_hdl = hcl_d.CreateLoopHandleOp(
+            op_hdl.result, StringAttr.get(axis), ip=self.ip
+        )
+        hcl_d.PipelineOp(loop_hdl.result, ii=ii, ip=self.ip)
+
+    def build(self, target):
+        if target == "vhls":
+            buf = io.StringIO()
+            hcl_d.emit_vhls(self.module, buf)
+            buf.seek(0)
+            hls_code = buf.read()
+            return hls_code
+        elif str(target.tool.mode) == "debug":
+            target.top = self.top_func.name.value
+            copy_build_files(target)
+            buf = io.StringIO()
+            hcl_d.emit_vhls(self.module, buf)
+            buf.seek(0)
+            hls_code = buf.read()
+            with open(f"{target.project}/kernel.cpp", "w", encoding="utf-8") as outfile:
+                outfile.write(hls_code)
+            with open(f"{target.project}/host.cpp", "w", encoding="utf-8") as outfile:
+                outfile.write("")
+
+            hcl_module = HCLModule(target.top, hls_code, target, host_src=None)
+            return hcl_module
+        else:
+            NotImplementedError("Target {} is not supported".format(target))
 
 
 def customize(fn):
