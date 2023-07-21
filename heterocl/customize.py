@@ -24,7 +24,7 @@ from hcl_mlir.exceptions import (
 from .ir.builder import ASTTransformer, ASTContext
 from .context import get_context, set_context, get_location
 from .ir.transform import get_loop_band_names
-from .build_module import _mlir_lower_pipeline
+from .build_module import _mlir_lower_pipeline, build_llvm
 from .runtime import copy_build_files
 from .module import HCLModule
 
@@ -75,6 +75,9 @@ class Schedule:
         self.module = module
         self.top_func = top_func
         self.ip = ip
+
+    def __repr__(self):
+        return str(self.module)
 
     @wrapped_apply
     def split(self, name, factor):
@@ -161,8 +164,11 @@ class Schedule:
         memref_type = MemRefType.get((1,), F32Type.get())
         hcl_d.ReuseAtOp(memref_type, target.result, loop_hdl.result, ip=self.ip)
 
-    def build(self, target):
-        if target == "vhls":
+    def build(self, target=None):
+        if target is None:
+            target = "llvm"
+            return build_llvm(self, top_func_name=self.top_func.name.value)
+        elif target == "vhls":
             buf = io.StringIO()
             hcl_d.emit_vhls(self.module, buf)
             buf.seek(0)

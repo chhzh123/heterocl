@@ -397,6 +397,9 @@ class ASTTransformer(Builder):
             alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
             alloc_op.attributes["name"] = StringAttr.get(node.target.id)
             ctx.buffers[node.target.id] = alloc_op
+            ASTTransformer.build_store(
+                ctx, node.target, MockConstant(node.value.value, ctx)
+            )
         else:
             raise RuntimeError("Unsupported AnnAssign")
 
