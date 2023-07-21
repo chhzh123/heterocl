@@ -137,7 +137,7 @@ class Schedule:
         loop_hdl = hcl_d.CreateLoopHandleOp(
             op_hdl.result, StringAttr.get(axis), ip=self.ip
         )
-        memref_type = MemRefType.get((1024,), F32Type.get())
+        memref_type = MemRefType.get((1,), F32Type.get())
         hcl_d.BufferAtOp(memref_type, target.result, loop_hdl.result, ip=self.ip)
 
     @wrapped_apply
@@ -150,6 +150,16 @@ class Schedule:
             op_hdl.result, StringAttr.get(axis), ip=self.ip
         )
         hcl_d.PipelineOp(loop_hdl.result, ii=ii, ip=self.ip)
+
+    @wrapped_apply
+    def reuse_at(self, target, axis):
+        band_name = get_loop_band_names(self.top_func)[0]
+        op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
+        loop_hdl = hcl_d.CreateLoopHandleOp(
+            op_hdl.result, StringAttr.get(axis), ip=self.ip
+        )
+        memref_type = MemRefType.get((1,), F32Type.get())
+        hcl_d.ReuseAtOp(memref_type, target.result, loop_hdl.result, ip=self.ip)
 
     def build(self, target):
         if target == "vhls":

@@ -141,17 +141,18 @@ def test_conv2D_lb():
         return B
 
     s = hcl.customize(conv2D)
+    s.reuse_at(conv2D.A, axis="i")
     print(s.module)
 
 
 if __name__ == "__main__":
-    test_gemm_grid_for()
-    test_gemm_range_for()
-    test_gemm_reduction_var()
-    test_gemm_float()
-    test_nested_if()
-    test_interleaving_acc()
-    test_buffer_at()
+    # test_gemm_grid_for()
+    # test_gemm_range_for()
+    # test_gemm_reduction_var()
+    # test_gemm_float()
+    # test_nested_if()
+    # test_interleaving_acc()
+    # test_buffer_at()
     # test_platform()
     test_conv2D_lb()
 
