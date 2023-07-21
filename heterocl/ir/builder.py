@@ -60,6 +60,9 @@ class ASTContext:
         self.induction_vars = {}
         self.top_func = None
         self.global_vars = global_vars
+        # used for AffineExpr dim counting
+        self.dim_count = 0
+        self.affine_vars = []
 
     def set_ip(self, ip):
         if not isinstance(ip, InsertionPoint):
@@ -315,22 +318,51 @@ class ASTTransformer(Builder):
         return AffineExpr.get_dim(list(ctx.induction_vars.keys()).index(node.id))
 
     @staticmethod
+    def build_affine_exp(ctx, node):
+        if isinstance(node, ast.Name):
+            ctx.dim_count += 1
+            ctx.affine_vars.append(node.id)
+            return AffineExpr.get_dim(ctx.dim_count - 1)
+        elif isinstance(node, ast.BinOp):
+            lhs = ASTTransformer.build_affine_exp(ctx, node.left)
+            rhs = ASTTransformer.build_affine_exp(ctx, node.right)
+            op = {
+                ast.Add: lambda l, r: l + r,
+                ast.Sub: lambda l, r: l - r,
+                ast.Mult: lambda l, r: l * r,
+                ast.Div: lambda l, r: l / r,
+                ast.FloorDiv: lambda l, r: l // r,
+                ast.Mod: lambda l, r: l % r,
+                ast.Pow: lambda l, r: l**r,
+                ast.LShift: lambda l, r: l << r,
+                ast.RShift: lambda l, r: l >> r,
+                ast.BitOr: lambda l, r: l | r,
+                ast.BitXor: lambda l, r: l ^ r,
+                ast.BitAnd: lambda l, r: l & r,
+            }.get(type(node.op))
+            return op(lhs, rhs)
+        else:
+            raise RuntimeError("Unsupported affine expression")
+
+    @staticmethod
     def build_Subscript(ctx, node):
         # Load op
-        dim_count = len(node.slice.value.elts)
+        ctx.dim_count = 0
         index_exprs = []
-        for index in range(dim_count):
-            index_exprs.append(AffineExpr.get_dim(index))
+        for index in node.slice.value.elts:
+            index_exprs.append(ASTTransformer.build_affine_exp(ctx, index))
         ip = ctx.get_ip()
         if isinstance(node.ctx, ast.Load):
             affine_map = AffineMap.get(
-                dim_count=dim_count, symbol_count=0, exprs=index_exprs
+                dim_count=ctx.dim_count, symbol_count=0, exprs=index_exprs
             )
             affine_attr = AffineMapAttr.get(affine_map)
-            ivs = [ctx.induction_vars[x.id] for x in node.slice.value.elts]
+            ivs = [ctx.buffers[x].result for x in ctx.affine_vars]
             load_op = affine_d.AffineLoadOp(
                 ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
             )
+            ctx.dim_count = 0
+            ctx.affine_vars = []
             return load_op
         else:
             raise RuntimeError("Unsupported Subscript")

@@ -132,14 +132,27 @@ def test_buffer_at():
     print(s.module)
 
 
+def test_conv2D_lb():
+    def conv2D(A: int32[10, 10]) -> int32[8, 8]:
+        B: int32[8, 8] = 0
+        for i, j in hcl.grid(8, 8):
+            for rx, ry in hcl.reduction(3, 3):
+                B[i, j] += A[i + rx, j + ry]
+        return B
+
+    s = hcl.customize(conv2D)
+    print(s.module)
+
+
 if __name__ == "__main__":
-    # test_gemm_grid_for()
-    # test_gemm_range_for()
-    # test_gemm_reduction_var()
-    # test_gemm_float()
-    # test_nested_if()
-    # test_interleaving_acc()
-    # test_buffer_at()
-    test_platform()
+    test_gemm_grid_for()
+    test_gemm_range_for()
+    test_gemm_reduction_var()
+    test_gemm_float()
+    test_nested_if()
+    test_interleaving_acc()
+    test_buffer_at()
+    # test_platform()
+    test_conv2D_lb()
 
 sys.exit()
