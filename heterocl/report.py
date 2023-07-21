@@ -455,7 +455,7 @@ def parse_xml(path, prod_name, top="top", print_flag=False):
     avail_resources = area_estimate["AvailableResources"]
     resources = {}
     for name in ("BRAM_18K", "DSP48E", "FF", "LUT"):
-        item = (est_resources[name], avail_resources[name])
+        item = [est_resources[name], avail_resources[name]]
         item.append(f"{round(int(item[0]) / int(item[1]) * 100)}%")
         resources[name] = item.copy()
     res["Resources"] = tabulate(
