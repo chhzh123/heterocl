@@ -192,15 +192,15 @@ def test_bconv2D_nchw():
 
 
 if __name__ == "__main__":
-    # test_gemm_grid_for()
-    # test_gemm_range_for()
-    # test_gemm_reduction_var()
-    # test_gemm_float()
-    # test_nested_if()
+    test_gemm_grid_for()
+    test_gemm_range_for()
+    test_gemm_reduction_var()
+    test_gemm_float()
+    test_nested_if()
     # test_interleaving_acc()
-    # test_buffer_at()
+    test_buffer_at()
     # test_platform()
-    # test_conv2D()
-    test_bconv2D_nchw()
+    test_conv2D()
+    # test_bconv2D_nchw()
 
 sys.exit()

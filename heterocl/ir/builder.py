@@ -263,7 +263,13 @@ class ASTTransformer(Builder):
     def build_store(ctx, node, val):
         ip = ctx.get_ip()
         if isinstance(node, ast.Subscript):
-            dim_count = len(node.slice.value.elts)
+            # Note: Python 3.10 will generate different AST for Subscript compared to Python 3.8
+            #       3.10 directly flattens the Index node and removes all the None attributes
+            #       inside the node
+            slice = (
+                node.slice if isinstance(node.slice, ast.Tuple) else node.slice.value
+            )  # ast.Index
+            dim_count = len(slice.elts)
             index_exprs = []
             for index in range(dim_count):
                 index_exprs.append(AffineExpr.get_dim(index))
@@ -271,7 +277,7 @@ class ASTTransformer(Builder):
                 dim_count=dim_count, symbol_count=0, exprs=index_exprs
             )
             affine_attr = AffineMapAttr.get(affine_map)
-            ivs = [ctx.induction_vars[x.id] for x in node.slice.value.elts]
+            ivs = [ctx.induction_vars[x.id] for x in slice.elts]
             store_op = affine_d.AffineStoreOp(
                 val.result, ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
             )
@@ -374,7 +380,10 @@ class ASTTransformer(Builder):
         # Load op
         ctx.dim_count = 0
         index_exprs = []
-        for index in node.slice.value.elts:
+        slice = (
+            node.slice if isinstance(node.slice, ast.Tuple) else node.slice.value
+        )  # ast.Index
+        for index in slice.elts:
             index_exprs.append(ASTTransformer.build_affine_exp(ctx, index))
         ip = ctx.get_ip()
         if isinstance(node.ctx, ast.Load):
@@ -404,9 +413,14 @@ class ASTTransformer(Builder):
             raise RuntimeError("Only support zero value for now")
         if isinstance(type_hint, ast.Subscript):
             type_str = type_hint.value.id
+            slice = (
+                type_hint.slice
+                if isinstance(type_hint.slice, ast.Tuple)
+                else type_hint.slice.value
+            )  # ast.Index
             shape = [
                 x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
-                for x in type_hint.slice.value.elts
+                for x in slice.elts
             ]
             ele_type = get_mlir_type(type_str)
             memref_type = MemRefType.get(shape, ele_type)
@@ -443,9 +457,14 @@ class ASTTransformer(Builder):
         def build_type(type_hint):
             if isinstance(type_hint, ast.Subscript):
                 type_str = type_hint.value.id
+                slice = (
+                    type_hint.slice
+                    if isinstance(type_hint.slice, ast.Tuple)
+                    else type_hint.slice.value
+                )  # ast.Index
                 shape = [
                     x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
-                    for x in type_hint.slice.value.elts
+                    for x in slice.elts
                 ]
                 ele_type = get_mlir_type(type_str)
                 memref_type = MemRefType.get(shape, ele_type)
