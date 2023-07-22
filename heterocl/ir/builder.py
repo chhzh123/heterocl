@@ -23,6 +23,7 @@ from hcl_mlir.dialects import (
     func as func_d,
     memref as memref_d,
     affine as affine_d,
+    scf as scf_d,
     arith as arith_d,
     math as math_d,
     linalg as linalg_d,
@@ -107,6 +108,29 @@ class MockConstant(MockOp):
             value_attr = FloatAttr.get(dtype, self.val)
         const_op = arith_d.ConstantOp(dtype, value_attr, ip=self.ctx.get_ip())
         return const_op.result
+
+
+class MockScalar(MockOp):
+    def __init__(self, name, dtype, ctx):
+        self.name = name
+        self.ctx = ctx
+        shape = (1,)
+        ele_type = get_mlir_type(dtype)
+        memref_type = MemRefType.get(shape, ele_type)
+        alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ctx.get_ip())
+        alloc_op.attributes["name"] = StringAttr.get(name)
+        self.op = alloc_op
+
+    @property
+    def result(self):
+        affine_map = AffineMap.get(
+            dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
+        )
+        affine_attr = AffineMapAttr.get(affine_map)
+        load = affine_d.AffineLoadOp(
+            self.op.result, [], affine_attr, ip=self.ctx.get_ip()
+        )
+        return load.result
 
 
 class ASTTransformer(Builder):
@@ -248,6 +272,9 @@ class ASTTransformer(Builder):
             },
         }.get(type(node.op))
         dtype = str(lhs.result.type)
+        # FIXME: workaround to get the type
+        if dtype.startswith("memref"):
+            dtype = str(rhs.result.type)
         if dtype.startswith("i"):
             op = opcls["int"]
         elif dtype.startswith("fixed"):
@@ -257,6 +284,34 @@ class ASTTransformer(Builder):
         else:
             raise RuntimeError("Unsupported types for binary op: {}".format(dtype))
         return op(lhs.result, rhs.result, ip=ctx.get_ip())
+
+    @staticmethod
+    def build_UnaryOp(ctx, node):
+        if isinstance(node.op, ast.USub):
+            opcls = {
+                "float": arith_d.NegFOp,
+                "int": RuntimeError,
+                "fixed": RuntimeError,
+            }
+        elif isinstance(node.op, ast.UAdd):
+            opcls = {
+                "float": RuntimeError,
+                "int": RuntimeError,
+                "fixed": RuntimeError,
+            }
+        else:
+            raise RuntimeError("Unsupported unary op")
+        if not isinstance(node.operand, ast.Constant):
+            raise RuntimeError("Only support constant for unary op")
+        if isinstance(node.operand.value, int):
+            op = opcls["int"]
+        elif isinstance(node.operand.value, float):
+            op = opcls["float"]
+        else:
+            raise RuntimeError(
+                "Unsupported types for unary op: {}".format(type(node.operand.value))
+            )
+        return op(MockConstant(node.operand.value, ctx).result, ip=ctx.get_ip())
 
     @staticmethod
     def build_BinOp(ctx, node):
@@ -284,8 +339,12 @@ class ASTTransformer(Builder):
             )
             affine_attr = AffineMapAttr.get(affine_map)
             ivs = [ctx.induction_vars[x.id] for x in elts]
+            if isinstance(ctx.buffers[node.value.id], MockScalar):
+                target = ctx.buffers[node.value.id].op.result
+            else:
+                target = ctx.buffers[node.value.id].result
             store_op = affine_d.AffineStoreOp(
-                val.result, ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
+                val.result, target, ivs, affine_attr, ip=ip
             )
             store_op.attributes["to"] = StringAttr.get(node.value.id)
             return store_op
@@ -294,8 +353,12 @@ class ASTTransformer(Builder):
                 dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
             )
             affine_attr = AffineMapAttr.get(affine_map)
+            if isinstance(ctx.buffers[node.id], MockScalar):
+                target = ctx.buffers[node.id].op.result
+            else:
+                target = ctx.buffers[node.id].result
             store_op = affine_d.AffineStoreOp(
-                val.result, ctx.buffers[node.id].result, [], affine_attr, ip=ip
+                val.result, target, [], affine_attr, ip=ip
             )
             store_op.attributes["to"] = StringAttr.get(node.id)
             return store_op
@@ -445,12 +508,7 @@ class ASTTransformer(Builder):
         elif isinstance(type_hint, ast.Name):
             type_str = type_hint.id
             # TODO: figure out why zero-shape cannot work
-            shape = (1,)
-            ele_type = get_mlir_type(type_str)
-            memref_type = MemRefType.get(shape, ele_type)
-            alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
-            alloc_op.attributes["name"] = StringAttr.get(node.target.id)
-            ctx.buffers[node.target.id] = alloc_op
+            ctx.buffers[node.target.id] = MockScalar(node.target.id, type_str, ctx)
             ASTTransformer.build_store(ctx, node.target, rhs)
         else:
             raise RuntimeError("Unsupported AnnAssign")
@@ -512,35 +570,122 @@ class ASTTransformer(Builder):
         ctx.top_func = func_op
 
     @staticmethod
-    def build_Compare(ctx, node):
-        eq_flags = []
-        cond_op = node.ops[0]
-        if not isinstance(cond_op, ast.Eq):
-            raise NotImplementedError("Only support '==' for now")
-        exprs = []
-        exprs.append(
-            AffineExpr.get_dim(0) - AffineConstantExpr.get(node.comparators[0].value)
-        )
-        eq_flags.append(True)
-        if_cond_set = IntegerSet.get(1, 0, exprs, eq_flags)
-        attr = hcl_d.IntegerSetAttr.get(if_cond_set)
-        return attr, ctx.buffers[node.left.id]
+    def build_Compare(ctx, node, is_affine=False):
+        ATTR_MAP = {
+            "int": {
+                ast.Eq: 0,
+                ast.NotEq: 1,
+                ast.Lt: 2,
+                ast.LtE: 3,
+                ast.Gt: 4,
+                ast.GtE: 5,
+                "ult": 6,
+                "ule": 7,
+                "ugt": 8,
+                "uge": 9,
+            },
+            "float": {
+                "false": 0,
+                ast.Eq: 1,
+                ast.Gt: 2,
+                ast.GtE: 3,
+                ast.Lt: 4,
+                ast.LtE: 5,
+                "one": 6,
+                "ord": 7,
+                "ueq": 8,
+                "ugt": 9,
+                "uge": 10,
+                "ult": 11,
+                "ule": 12,
+                "une": 13,
+                "uno": 14,
+                "true": 15,
+            },
+            "fixed": {
+                "eq": 0,
+                "ne": 1,
+                "slt": 2,
+                "sle": 3,
+                "sgt": 4,
+                "sge": 5,
+                "ult": 6,
+                "ule": 7,
+                "ugt": 8,
+                "uge": 9,
+            },
+        }
+        if is_affine:
+            eq_flags = []
+            cond_op = node.ops[0]
+            if not isinstance(cond_op, ast.Eq):
+                raise NotImplementedError("Only support '==' for now")
+            exprs = []
+            exprs.append(
+                AffineExpr.get_dim(0)
+                - AffineConstantExpr.get(node.comparators[0].value)
+            )
+            eq_flags.append(True)
+            if_cond_set = IntegerSet.get(1, 0, exprs, eq_flags)
+            attr = hcl_d.IntegerSetAttr.get(if_cond_set)
+            return attr, ctx.buffers[node.left.id]
+        else:
+            lhs = build_stmt(ctx, node.left)
+            rhs = build_stmt(ctx, node.comparators[0])
+            dtype = str(rhs.result.type)
+            out_dtype = IntegerType.get_signless(1)
+            if dtype.startswith("i"):
+                op = ATTR_MAP["int"][type(node.ops[0])]
+                op = IntegerAttr.get(IntegerType.get_signless(64), op)
+                return arith_d.CmpIOp(
+                    out_dtype, op, lhs.result, rhs.result, ip=ctx.get_ip()
+                )
+            elif dtype.startswith("fixed"):
+                op = ATTR_MAP["fixed"][type(node.ops[0])]
+                op = IntegerAttr.get(IntegerType.get_signless(64), op)
+                return hcl_d.CmpFixedOp(
+                    out_dtype, op, lhs.result, rhs.result, ip=ctx.get_ip()
+                )
+            elif dtype.startswith("f"):
+                op = ATTR_MAP["float"][type(node.ops[0])]
+                op = IntegerAttr.get(IntegerType.get_signless(64), op)
+                return arith_d.CmpFOp(
+                    out_dtype, op, lhs.result, rhs.result, ip=ctx.get_ip()
+                )
+            else:
+                raise RuntimeError("Unsupported types for binary op: {}".format(dtype))
 
     @staticmethod
-    def build_If(ctx, node):
-        # Should build the condition on-the-fly
-        cond, var = build_stmt(ctx, node.test)
-        if_op = affine_d.AffineIfOp(
-            cond, [var.result], ip=ctx.get_ip(), hasElse=len(node.orelse), results_=[]
-        )
+    def build_If(ctx, node, is_affine=False):
+        if is_affine:
+            # Should build the condition on-the-fly
+            cond, var = build_stmt(ctx, node.test)
+            if_op = affine_d.AffineIfOp(
+                cond,
+                [var.result],
+                ip=ctx.get_ip(),
+                hasElse=len(node.orelse),
+                results_=[],
+            )
+        else:
+            cond = build_stmt(ctx, node.test)
+            if_op = scf_d.IfOp(
+                cond.result, results_=[], ip=ctx.get_ip(), hasElse=len(node.orelse)
+            )
         ctx.set_ip(if_op.then_block)
         build_stmts(ctx, node.body)
-        affine_d.AffineYieldOp([], ip=ctx.get_ip())
+        if is_affine:
+            affine_d.AffineYieldOp([], ip=ctx.get_ip())
+        else:
+            scf_d.YieldOp([], ip=ctx.get_ip())
         ctx.pop_ip()
         if len(node.orelse) > 0:
             ctx.set_ip(if_op.else_block)
             build_stmts(ctx, node.orelse)
-            affine_d.AffineYieldOp([], ip=ctx.get_ip())
+            if is_affine:
+                affine_d.AffineYieldOp([], ip=ctx.get_ip())
+            else:
+                scf_d.YieldOp([], ip=ctx.get_ip())
             ctx.pop_ip()
 
     @staticmethod
@@ -583,18 +728,7 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Return(ctx, node):
-        ip = ctx.pop_ip()
-        if MemRefType(ctx.buffers[node.value.id].result.type).shape == [1]:  # scalar
-            affine_map = AffineMap.get(
-                dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
-            )
-            affine_attr = AffineMapAttr.get(affine_map)
-            load = affine_d.AffineLoadOp(
-                ctx.buffers[node.value.id].result, [], affine_attr, ip=ip
-            )
-            func_d.ReturnOp([load.result], ip=ip)
-        else:
-            func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ip)
+        func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ctx.pop_ip())
         return
 
 

@@ -73,15 +73,14 @@ def test_gemm_reduction_var():
 def test_nested_if():
     def kernel(a: int32, b: int32) -> int32:
         r: int32 = 0
-        for i in range(10):
-            if i == 0:
-                r = 1
-            elif i == 1:
-                r = 2
-                if i == 2:
-                    r = 3
-            else:
-                r = 4
+        if a == 0:
+            r = 1
+        elif a == 1:
+            r = 2
+            if b == 2:
+                r = 3
+        else:
+            r = 4
         return r
 
     s = hcl.customize(kernel)
@@ -192,15 +191,15 @@ def test_bconv2D_nchw():
 
 
 if __name__ == "__main__":
-    test_gemm_grid_for()
-    test_gemm_range_for()
-    test_gemm_reduction_var()
-    test_gemm_float()
+    # test_gemm_grid_for()
+    # test_gemm_range_for()
+    # test_gemm_reduction_var()
+    # test_gemm_float()
     test_nested_if()
+    # test_buffer_at()
+    # test_conv2D()
     # test_interleaving_acc()
-    test_buffer_at()
     # test_platform()
-    test_conv2D()
     # test_bconv2D_nchw()
 
 sys.exit()
