@@ -199,12 +199,15 @@ class Schedule:
             _mlir_lower_pipeline(self.module, lower_linalg=True)
             return build_llvm(self, top_func_name=self.top_func.name.value)
         elif target == "vhls":
+            # FIXME: Handle linalg.fill
+            _mlir_lower_pipeline(self.module, lower_linalg=True)
             buf = io.StringIO()
             hcl_d.emit_vhls(self.module, buf)
             buf.seek(0)
             hls_code = buf.read()
             return hls_code
         elif str(target.tool.mode) == "debug":
+            _mlir_lower_pipeline(self.module, lower_linalg=True)
             target.top = self.top_func.name.value
             copy_build_files(target)
             buf = io.StringIO()
