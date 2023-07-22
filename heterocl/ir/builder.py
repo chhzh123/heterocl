@@ -422,10 +422,7 @@ class ASTTransformer(Builder):
             raise RuntimeError(
                 "Please explicitly initialize the buffer with an initial value"
             )
-        if not isinstance(node.value, ast.Constant):
-            raise RuntimeError("Only support constant value for now")
-        if node.value.value != 0:
-            raise RuntimeError("Only support zero value for now")
+        rhs = build_stmt(ctx, node.value)
         if isinstance(type_hint, ast.Subscript):
             type_str = type_hint.value.id
             slice = (
@@ -443,9 +440,8 @@ class ASTTransformer(Builder):
             alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
             alloc_op.attributes["name"] = StringAttr.get(node.target.id)
             ctx.buffers[node.target.id] = alloc_op
-            cst = MockConstant(node.value.value, ctx)
             with ip:
-                linalg_d.fill(cst.result, outs=[alloc_op.result])
+                linalg_d.fill(rhs.result, outs=[alloc_op.result])
         elif isinstance(type_hint, ast.Name):
             type_str = type_hint.id
             # TODO: figure out why zero-shape cannot work
@@ -455,9 +451,7 @@ class ASTTransformer(Builder):
             alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
             alloc_op.attributes["name"] = StringAttr.get(node.target.id)
             ctx.buffers[node.target.id] = alloc_op
-            ASTTransformer.build_store(
-                ctx, node.target, MockConstant(node.value.value, ctx)
-            )
+            ASTTransformer.build_store(ctx, node.target, rhs)
         else:
             raise RuntimeError("Unsupported AnnAssign")
 
@@ -563,7 +557,11 @@ class ASTTransformer(Builder):
                     return MockConstant(float(ctx.global_vars[node.args[0].id]), ctx)
                 else:
                     # TODO: Support other types
-                    return arith_d.SIToFPOp(F32Type.get(), ctx.buffers[node.args[0].id].result, ip=ctx.get_ip())
+                    return arith_d.SIToFPOp(
+                        F32Type.get(),
+                        ctx.buffers[node.args[0].id].result,
+                        ip=ctx.get_ip(),
+                    )
             elif node.func.id == "int":
                 return MockConstant(int(ctx.global_vars[node.args[0].id]), ctx)
         if node.func.value.id != "hcl":
