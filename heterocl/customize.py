@@ -221,15 +221,17 @@ class Schedule:
             NotImplementedError("Target {} is not supported".format(target))
 
 
-def customize(fn):
+def customize(fn, verbose=False):
     # Get Python AST
     file = getsourcefile(fn)
     src, start_lineno = getsourcelines(fn)
     src = [textwrap.fill(line, tabsize=4, width=9999) for line in src]
     src = textwrap.dedent("\n".join(src))
-    print(src)
+    if verbose:
+        print(src)
     tree = ast.parse(src)
-    print(ast.dump(tree))
+    if verbose:
+        print(ast.dump(tree))
     # Create MLIR module
     set_context()
     with get_context() as mlir_ctx, get_location():
