@@ -196,6 +196,7 @@ class Schedule:
     def build(self, target=None):
         if target is None or target == "llvm":
             target = "llvm"
+            _mlir_lower_pipeline(self.module, lower_linalg=True)
             return build_llvm(self, top_func_name=self.top_func.name.value)
         elif target == "vhls":
             buf = io.StringIO()

@@ -34,6 +34,8 @@ def _mlir_lower_pipeline(module, **kwargs):
     passes = ["affine-loop-normalize", "cse", "affine-simplify-structures"]
     if "canonicalize" in kwargs:
         passes += ["canonicalize"]
+    if "lower_linalg" in kwargs:
+        passes += ["convert-linalg-to-affine-loops"]
     pipeline = f'func.func({",".join(passes)})'
     try:
         with get_context():

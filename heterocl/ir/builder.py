@@ -25,6 +25,7 @@ from hcl_mlir.dialects import (
     affine as affine_d,
     arith as arith_d,
     math as math_d,
+    linalg as linalg_d,
 )
 from hcl_mlir import get_mlir_type
 from ..utils import get_src_loc
@@ -412,6 +413,9 @@ class ASTTransformer(Builder):
             alloc_op = memref_d.AllocOp(memref_type, [], [], ip=ip, loc=loc)
             alloc_op.attributes["name"] = StringAttr.get(node.target.id)
             ctx.buffers[node.target.id] = alloc_op
+            cst = MockConstant(node.value.value, ctx)
+            with ip:
+                linalg_d.fill(cst.result, outs=[alloc_op.result])
         elif isinstance(type_hint, ast.Name):
             type_str = type_hint.id
             # TODO: figure out why zero-shape cannot work
