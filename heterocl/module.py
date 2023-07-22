@@ -15,7 +15,8 @@ from .devices import Platform
 from .report import report_stats
 from .runtime import execute_fpga_backend, execute_llvm_backend
 from .utils import hcl_dtype_to_mlir
-from .operation import asarray, Array
+from .operation import asarray
+from .types import Float, Int
 
 
 class HCLModule:
@@ -50,8 +51,13 @@ class HCLModule:
                 if isinstance(arg, (int, float)):
                     np_array = np.array([arg], dtype=type(arg))
                     argv[i] = asarray(np_array)
-                elif not isinstance(arg, Array):
-                    argv[i] = asarray(arg)
+                elif isinstance(arg, np.ndarray):
+                    if arg.dtype == np.float64 or arg.dtype == np.float32:
+                        argv[i] = asarray(arg, dtype=Float())
+                    elif arg.dtype == np.int64 or arg.dtype == np.int32:
+                        argv[i] = asarray(arg, dtype=Int())
+                    else:
+                        argv[i] = asarray(arg)
             original_results = []
             with get_context(), get_location():
                 for op in self.host_src.body.operations:
