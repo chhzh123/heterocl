@@ -269,7 +269,8 @@ class ASTTransformer(Builder):
             slice = (
                 node.slice if isinstance(node.slice, ast.Tuple) else node.slice.value
             )  # ast.Index
-            dim_count = len(slice.elts)
+            elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
+            dim_count = len(elts)
             index_exprs = []
             for index in range(dim_count):
                 index_exprs.append(AffineExpr.get_dim(index))
@@ -277,11 +278,12 @@ class ASTTransformer(Builder):
                 dim_count=dim_count, symbol_count=0, exprs=index_exprs
             )
             affine_attr = AffineMapAttr.get(affine_map)
-            ivs = [ctx.induction_vars[x.id] for x in slice.elts]
+            ivs = [ctx.induction_vars[x.id] for x in elts]
             store_op = affine_d.AffineStoreOp(
                 val.result, ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
             )
             store_op.attributes["to"] = StringAttr.get(node.value.id)
+            return store_op
         elif isinstance(node, ast.Name):  # scalar
             affine_map = AffineMap.get(
                 dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
@@ -291,6 +293,7 @@ class ASTTransformer(Builder):
                 val.result, ctx.buffers[node.id].result, [], affine_attr, ip=ip
             )
             store_op.attributes["to"] = StringAttr.get(node.id)
+            return store_op
         else:
             raise RuntimeError("Unsupported store")
 
@@ -383,7 +386,8 @@ class ASTTransformer(Builder):
         slice = (
             node.slice if isinstance(node.slice, ast.Tuple) else node.slice.value
         )  # ast.Index
-        for index in slice.elts:
+        elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
+        for index in elts:
             index_exprs.append(ASTTransformer.build_affine_exp(ctx, index))
         ip = ctx.get_ip()
         if isinstance(node.ctx, ast.Load):
@@ -418,9 +422,10 @@ class ASTTransformer(Builder):
                 if isinstance(type_hint.slice, ast.Tuple)
                 else type_hint.slice.value
             )  # ast.Index
+            elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
             shape = [
                 x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
-                for x in slice.elts
+                for x in elts
             ]
             ele_type = get_mlir_type(type_str)
             memref_type = MemRefType.get(shape, ele_type)
@@ -462,9 +467,10 @@ class ASTTransformer(Builder):
                     if isinstance(type_hint.slice, ast.Tuple)
                     else type_hint.slice.value
                 )  # ast.Index
+                elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
                 shape = [
                     x.value if isinstance(x, ast.Constant) else ctx.global_vars[x.id]
-                    for x in slice.elts
+                    for x in elts
                 ]
                 ele_type = get_mlir_type(type_str)
                 memref_type = MemRefType.get(shape, ele_type)
@@ -540,9 +546,14 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Call(ctx, node):
-        build_stmt(ctx, node.func)
-        build_stmts(ctx, node.args)
-        build_stmts(ctx, node.keywords)
+        if node.func.value.id != "hcl":
+            raise RuntimeError("Only support hcl functions for now")
+        if node.func.attr == "exp":
+            op = math_d.ExpOp
+        else:
+            raise RuntimeError("Unsupported hcl function")
+        new_args = [stmt.result for stmt in build_stmts(ctx, node.args)]
+        return op(*new_args, ip=ctx.get_ip())
 
     @staticmethod
     def build_Return(ctx, node):
@@ -565,9 +576,7 @@ build_stmt = ASTTransformer()
 
 
 def build_stmts(ctx, stmts):
+    results = []
     for stmt in stmts:
-        # if ctx.returned != ReturnStatus.NoReturn or ctx.loop_status() != LoopStatus.Normal:
-        #     break
-        # else:
-        build_stmt(ctx, stmt)
-    return stmts
+        results.append(build_stmt(ctx, stmt))
+    return results
