@@ -112,7 +112,12 @@ class MockConstant(MockOp):
 class ASTTransformer(Builder):
     @staticmethod
     def build_Name(ctx, node):
-        return ctx.buffers[node.id]
+        if node.id in ctx.buffers:
+            return ctx.buffers[node.id]
+        elif node.id in ctx.global_vars:
+            return MockConstant(ctx.global_vars[node.id], ctx)
+        else:
+            raise RuntimeError("Unsupported Name")
 
     @staticmethod
     def build_Constant(ctx, node):
@@ -375,6 +380,8 @@ class ASTTransformer(Builder):
                 ast.BitAnd: lambda l, r: l & r,
             }.get(type(node.op))
             return op(lhs, rhs)
+        elif isinstance(node, ast.Constant):
+            return AffineConstantExpr.get(node.value)
         else:
             raise RuntimeError("Unsupported affine expression")
 
@@ -411,6 +418,10 @@ class ASTTransformer(Builder):
         filename, lineno = get_src_loc()
         loc = Location.file(filename, lineno, 0)
         type_hint = node.annotation
+        if node.value is None:
+            raise RuntimeError(
+                "Please explicitly initialize the buffer with an initial value"
+            )
         if not isinstance(node.value, ast.Constant):
             raise RuntimeError("Only support constant value for now")
         if node.value.value != 0:
@@ -546,14 +557,26 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Call(ctx, node):
+        if isinstance(node.func, ast.Name):
+            if node.func.id == "float":
+                return MockConstant(float(ctx.global_vars[node.args[0].id]), ctx)
+            elif node.func.id == "int":
+                return MockConstant(int(ctx.global_vars[node.args[0].id]), ctx)
         if node.func.value.id != "hcl":
             raise RuntimeError("Only support hcl functions for now")
-        if node.func.attr == "exp":
-            op = math_d.ExpOp
-        else:
-            raise RuntimeError("Unsupported hcl function")
+        opcls = {
+            "exp": math_d.ExpOp,
+            "log": math_d.LogOp,
+            "log2": math_d.Log2Op,
+            "log10": math_d.Log10Op,
+            "sqrt": math_d.SqrtOp,
+            "sin": math_d.SinOp,
+            "cos": math_d.CosOp,
+            "tan": math_d.TanOp,
+            "pow": math_d.PowFOp,
+        }.get(node.func.attr)
         new_args = [stmt.result for stmt in build_stmts(ctx, node.args)]
-        return op(*new_args, ip=ctx.get_ip())
+        return opcls(*new_args, ip=ctx.get_ip())
 
     @staticmethod
     def build_Return(ctx, node):
