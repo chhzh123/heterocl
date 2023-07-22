@@ -577,7 +577,8 @@ class ASTTransformer(Builder):
             "sin": math_d.SinOp,
             "cos": math_d.CosOp,
             "tan": math_d.TanOp,
-            "pow": math_d.PowFOp,
+            "tanh": math_d.TanhOp,
+            "power": math_d.PowFOp,
         }.get(node.func.attr)
         new_args = [stmt.result for stmt in build_stmts(ctx, node.args)]
         return opcls(*new_args, ip=ctx.get_ip())
