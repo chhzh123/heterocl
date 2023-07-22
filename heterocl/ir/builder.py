@@ -559,7 +559,11 @@ class ASTTransformer(Builder):
     def build_Call(ctx, node):
         if isinstance(node.func, ast.Name):
             if node.func.id == "float":
-                return MockConstant(float(ctx.global_vars[node.args[0].id]), ctx)
+                if node.args[0].id in ctx.global_vars:
+                    return MockConstant(float(ctx.global_vars[node.args[0].id]), ctx)
+                else:
+                    # TODO: Support other types
+                    return arith_d.SIToFPOp(F32Type.get(), ctx.buffers[node.args[0].id].result, ip=ctx.get_ip())
             elif node.func.id == "int":
                 return MockConstant(int(ctx.global_vars[node.args[0].id]), ctx)
         if node.func.value.id != "hcl":
