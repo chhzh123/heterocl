@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import sys
+import numpy as np
 import heterocl as hcl
 from heterocl.ir.types import int1, int32, float32
 
@@ -156,8 +157,6 @@ def test_conv2D():
     mod = s.build()
 
     # testing
-    import numpy as np
-
     np_A = np.random.randint(0, 10, size=(10, 10))
     np_B = np.zeros((8, 8), dtype="int")
     np_C = np.zeros((8, 8), dtype="int")
@@ -193,16 +192,60 @@ def test_bconv2D_nchw():
     print(s.module)
 
 
+def test_nested_functions():
+    M, K, N = 32, 32, 32
+
+    def matrix_add(A: int32[M, N]) -> int32[M, N]:
+        B: int32[M, N] = 0
+        for i, j in hcl.grid(M, N):
+            B[i, j] = A[i, j] + 1
+        return B
+
+    def gemm(A: int32[M, K], B: int32[K, N]) -> int32[M, N]:
+        C: int32[M, N] = 0
+        for i, j, k in hcl.grid(M, N, K):
+            C[i, j] += A[i, k] * B[k, j]
+        return C
+
+    def top(A: int32[M, K], B: int32[K, N]) -> int32[M, N]:
+        C = gemm(A, B)
+        # D = matrix_add(C)
+        return C
+
+    # Separate compilation (just for testing)
+    s_gemm = hcl.customize(gemm)
+    mod_gemm = s_gemm.build()
+
+    # Top-level
+    s = hcl.customize(top)
+    print(s.module)
+    mod = s.build()
+
+    # Testing
+    np_A = np.random.randint(0, 10, size=(M, K))
+    np_B = np.random.randint(0, 10, size=(K, N))
+    np_C = np.zeros((M, N), dtype="int")
+    mod_gemm(np_A, np_B, np_C)
+    assert np.array_equal(np_C, np.matmul(np_A, np_B))
+
+    np_C = np.zeros((M, N), dtype="int")
+    mod(np_A, np_B, np_C)
+    np_D = np.matmul(np_A, np_B)
+    print(np_C, np_D)
+    assert np.array_equal(np_C, np_D)
+
+
 if __name__ == "__main__":
-    test_gemm_grid_for()
-    test_gemm_range_for()
-    test_gemm_reduction_var()
-    test_gemm_float()
-    test_nested_if()
-    test_buffer_at()
-    test_conv2D()
-    test_interleaving_acc()
+    # test_gemm_grid_for()
+    # test_gemm_range_for()
+    # test_gemm_reduction_var()
+    # test_gemm_float()
+    # test_nested_if()
+    # test_buffer_at()
+    # test_conv2D()
+    # test_interleaving_acc()
     # test_platform()
     # test_bconv2D_nchw()
+    test_nested_functions()
 
 sys.exit()

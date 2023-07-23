@@ -3,6 +3,8 @@
 # Reference: taichi/python/taichi/lang/ast/transform.py
 
 import ast
+import inspect
+import textwrap
 from hcl_mlir.ir import (
     Location,
     InsertionPoint,
@@ -19,6 +21,7 @@ from hcl_mlir.ir import (
     AffineMap,
     AffineMapAttr,
     IntegerSet,
+    FlatSymbolRefAttr,
 )
 from hcl_mlir.dialects import (
     hcl as hcl_d,
@@ -371,13 +374,17 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_Assign(ctx, node):
         # Compute RHS
-        ip = ctx.get_ip()
         if isinstance(node.value, ast.Name):  # scalar
             rhs = ctx.buffers[node.value.id]
         else:
             rhs = build_stmt(ctx, node.value)
         if len(node.targets) > 1:
             raise RuntimeError("Cannot assign to multiple targets")
+        if isinstance(rhs, func_d.CallOp):
+            if len(node.targets) > 1:
+                raise RuntimeError("Cannot support multiple results yet")
+            ctx.buffers[node.targets[0].id] = rhs
+            return rhs
         # Store LHS
         store_op = ASTTransformer.build_store(ctx, node.targets[0], rhs)
         return store_op
@@ -392,7 +399,7 @@ class ASTTransformer(Builder):
             node.target.ctx = ast.Load()
             lhs = build_stmt(ctx, node.target)
             node.target.ctx = ast.Store()
-            lhs.attributes["to"] = StringAttr.get(node.target.value.id)
+            lhs.attributes["from"] = StringAttr.get(node.target.value.id)
         elif isinstance(node.target, ast.Name):  # scalar
             lhs = ctx.buffers[node.target.id]
         else:
@@ -554,13 +561,14 @@ class ASTTransformer(Builder):
         func_type = FunctionType.get(input_types, output_types)
         func_op = func_d.FuncOp(name=node.name, type=func_type, ip=ip, loc=loc)
         func_op.add_entry_block()
+        ctx.top_func = func_op
         for name, arg in zip(arg_names, func_op.arguments):
             ctx.buffers[name] = MockArg(arg)
         ctx.set_ip(func_op.entry_block)
         stmts = build_stmts(ctx, node.body)
         if not isinstance(stmts[-1], func_d.ReturnOp):
             func_d.ReturnOp([], ip=ctx.pop_ip())
-        ctx.top_func = func_op
+        return func_op
 
     @staticmethod
     def build_Compare(ctx, node, is_affine=False):
@@ -692,6 +700,7 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_Call(ctx, node):
         if isinstance(node.func, ast.Name):
+            # Builtin functions
             if node.func.id == "float":
                 if node.args[0].id in ctx.global_vars:
                     return MockConstant(float(ctx.global_vars[node.args[0].id]), ctx)
@@ -704,6 +713,28 @@ class ASTTransformer(Builder):
                     )
             elif node.func.id == "int":
                 return MockConstant(int(ctx.global_vars[node.args[0].id]), ctx)
+            # User-defined functions
+            else:
+                # Build subfunction
+                func = ctx.global_vars[node.func.id]
+                src, start_lineno = inspect.getsourcelines(func)
+                src = [textwrap.fill(line, tabsize=4, width=9999) for line in src]
+                src = textwrap.dedent("\n".join(src))
+                tree = ast.parse(src)
+                # Create a new context to avoid name collision
+                func_ctx = ASTContext(global_vars=ctx.global_vars)
+                func_ctx.set_ip(ctx.top_func)
+                stmts = build_stmts(func_ctx, tree.body)
+                func_ctx.pop_ip()
+                # Build call function in the top-level
+                inputs = [ctx.buffers[arg.id].result for arg in node.args]
+                call_op = func_d.CallOp(
+                    stmts[-1].type.results,
+                    FlatSymbolRefAttr.get(node.func.id),
+                    inputs,
+                    ip=ctx.get_ip(),
+                )
+                return call_op
         if node.func.value.id != "hcl":
             raise RuntimeError("Only support hcl functions for now")
         opcls = {
