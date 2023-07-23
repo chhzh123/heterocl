@@ -209,8 +209,8 @@ def test_nested_functions():
 
     def top(A: int32[M, K], B: int32[K, N]) -> int32[M, N]:
         C = gemm(A, B)
-        # D = matrix_add(C)
-        return C
+        D = matrix_add(C)
+        return D
 
     # Separate compilation (just for testing)
     s_gemm = hcl.customize(gemm)
@@ -230,8 +230,33 @@ def test_nested_functions():
 
     np_C = np.zeros((M, N), dtype="int")
     mod(np_A, np_B, np_C)
+    np_D = np_A @ np_B + 1
+    assert np.array_equal(np_C, np_D)
+
+
+def test_nested_functions_2():
+    M, K, N = 32, 32, 32
+
+    def gemm(A: int32[M, K], B: int32[K, N], C: int32[M, N]) -> None:
+        for i, j, k in hcl.grid(M, N, K):
+            C[i, j] += A[i, k] * B[k, j]
+
+    def top(A: int32[M, K], B: int32[K, N]) -> int32[M, N]:
+        C: int32[M, N] = 0
+        gemm(A, B, C)
+        return C
+
+    # Top-level
+    s = hcl.customize(top, verbose=True)
+    print(s.module)
+    mod = s.build()
+
+    # Testing
+    np_A = np.random.randint(0, 100, size=(M, K))
+    np_B = np.random.randint(0, 100, size=(K, N))
+    np_C = np.zeros((M, N), dtype="int")
+    mod(np_A, np_B, np_C)
     np_D = np.matmul(np_A, np_B)
-    print(np_C, np_D)
     assert np.array_equal(np_C, np_D)
 
 
@@ -246,6 +271,7 @@ if __name__ == "__main__":
     # test_interleaving_acc()
     # test_platform()
     # test_bconv2D_nchw()
-    test_nested_functions()
+    # test_nested_functions()
+    test_nested_functions_2()
 
 sys.exit()
