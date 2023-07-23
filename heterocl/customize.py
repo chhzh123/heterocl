@@ -235,7 +235,12 @@ def customize(fn, verbose=False):
         print(src)
     tree = ast.parse(src)
     if verbose:
-        print(ast.dump(tree))
+        try:
+            import astpretty
+
+            astpretty.pprint(tree, indent=2, show_offsets=False)
+        except:
+            print(ast.dump(tree))
     # Create MLIR module
     set_context()
     with get_context() as mlir_ctx, get_location():
