@@ -456,6 +456,7 @@ class ASTTransformer(Builder):
             load_op = affine_d.AffineLoadOp(
                 ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
             )
+            load_op.attributes["from"] = StringAttr.get(node.value.id)
             ctx.dim_count = 0
             ctx.affine_vars = []
             return load_op
