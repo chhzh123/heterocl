@@ -1,3 +1,5 @@
+# Copyright HeteroCL authors. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 # Reference: taichi/python/taichi/lang/ast/transform.py
 
 import ast
