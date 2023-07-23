@@ -232,9 +232,9 @@ class ASTTransformer(Builder):
                 "fixed": hcl_d.DivFixedOp,
             },
             ast.FloorDiv: {
-                "float": arith_d.DivFOp,
-                "int": arith_d.DivSIOp,
-                "uint": arith_d.DivUIOp,
+                "float": RuntimeError,
+                "int": arith_d.FloorDivSIOp,
+                "uint": RuntimeError,
             },
             ast.Mod: {
                 "float": arith_d.RemFOp,
