@@ -130,6 +130,7 @@ class MockScalar(MockOp):
         load = affine_d.AffineLoadOp(
             self.op.result, [], affine_attr, ip=self.ctx.get_ip()
         )
+        load.attributes["from"] = StringAttr.get(self.name)
         return load.result
 
 
@@ -369,15 +370,8 @@ class ASTTransformer(Builder):
     def build_Assign(ctx, node):
         # Compute RHS
         ip = ctx.get_ip()
-        if isinstance(node.value, ast.Name):
-            affine_map = AffineMap.get(
-                dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
-            )
-            affine_attr = AffineMapAttr.get(affine_map)
-            load = affine_d.AffineLoadOp(
-                ctx.buffers[node.value.id].result, [], affine_attr, ip=ip
-            )
-            rhs = load
+        if isinstance(node.value, ast.Name):  # scalar
+            rhs = ctx.buffers[node.value.id]
         else:
             rhs = build_stmt(ctx, node.value)
         if len(node.targets) > 1:
@@ -398,14 +392,7 @@ class ASTTransformer(Builder):
             node.target.ctx = ast.Store()
             lhs.attributes["to"] = StringAttr.get(node.target.value.id)
         elif isinstance(node.target, ast.Name):  # scalar
-            affine_map = AffineMap.get(
-                dim_count=0, symbol_count=0, exprs=[AffineConstantExpr.get(0)]
-            )
-            affine_attr = AffineMapAttr.get(affine_map)
-            lhs = affine_d.AffineLoadOp(
-                ctx.buffers[node.target.id].result, [], affine_attr, ip=ip
-            )
-            lhs.attributes["from"] = StringAttr.get(node.target.id)
+            lhs = ctx.buffers[node.target.id]
         else:
             raise RuntimeError("Unsupported AugAssign")
         # Aug LHS
@@ -555,9 +542,10 @@ class ASTTransformer(Builder):
         # Build return type
         output_types = []
         output_typehints = []
-        output_type, extra_type_hint = build_type(node.returns)
-        output_types.append(output_type)
-        output_typehints.append(extra_type_hint)
+        if not (isinstance(node.returns, ast.Constant) and node.returns.value is None):
+            output_type, extra_type_hint = build_type(node.returns)
+            output_types.append(output_type)
+            output_typehints.append(extra_type_hint)
 
         # Build function
         func_type = FunctionType.get(input_types, output_types)
@@ -566,7 +554,9 @@ class ASTTransformer(Builder):
         for name, arg in zip(arg_names, func_op.arguments):
             ctx.buffers[name] = MockArg(arg)
         ctx.set_ip(func_op.entry_block)
-        build_stmts(ctx, node.body)
+        stmts = build_stmts(ctx, node.body)
+        if not isinstance(stmts[-1], func_d.ReturnOp):
+            func_d.ReturnOp([], ip=ctx.pop_ip())
         ctx.top_func = func_op
 
     @staticmethod
@@ -632,25 +622,27 @@ class ASTTransformer(Builder):
         else:
             lhs = build_stmt(ctx, node.left)
             rhs = build_stmt(ctx, node.comparators[0])
-            dtype = str(rhs.result.type)
+            # avoid rebuilding the same op
+            rhs_res = rhs.result
+            dtype = str(rhs_res.type)
             out_dtype = IntegerType.get_signless(1)
             if dtype.startswith("i"):
                 op = ATTR_MAP["int"][type(node.ops[0])]
                 op = IntegerAttr.get(IntegerType.get_signless(64), op)
                 return arith_d.CmpIOp(
-                    out_dtype, op, lhs.result, rhs.result, ip=ctx.get_ip()
+                    out_dtype, op, lhs.result, rhs_res, ip=ctx.get_ip()
                 )
             elif dtype.startswith("fixed"):
                 op = ATTR_MAP["fixed"][type(node.ops[0])]
                 op = IntegerAttr.get(IntegerType.get_signless(64), op)
                 return hcl_d.CmpFixedOp(
-                    out_dtype, op, lhs.result, rhs.result, ip=ctx.get_ip()
+                    out_dtype, op, lhs.result, rhs_res, ip=ctx.get_ip()
                 )
             elif dtype.startswith("f"):
                 op = ATTR_MAP["float"][type(node.ops[0])]
                 op = IntegerAttr.get(IntegerType.get_signless(64), op)
                 return arith_d.CmpFOp(
-                    out_dtype, op, lhs.result, rhs.result, ip=ctx.get_ip()
+                    out_dtype, op, lhs.result, rhs_res, ip=ctx.get_ip()
                 )
             else:
                 raise RuntimeError("Unsupported types for binary op: {}".format(dtype))
@@ -728,8 +720,11 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Return(ctx, node):
-        func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ctx.pop_ip())
-        return
+        return func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ctx.pop_ip())
+
+    @staticmethod
+    def build_Pass(ctx, node):
+        return None
 
 
 build_stmt = ASTTransformer()
