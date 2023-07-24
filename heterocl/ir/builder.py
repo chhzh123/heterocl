@@ -337,6 +337,7 @@ class ASTTransformer(Builder):
             )  # ast.Index
             elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
             ctx.dim_count = 0
+            ctx.affine_vars = []
             index_exprs = []
             for index in elts:
                 index_exprs.append(ASTTransformer.build_affine_expr(ctx, index))
@@ -443,6 +444,7 @@ class ASTTransformer(Builder):
     def build_Subscript(ctx, node):
         # Load op
         ctx.dim_count = 0
+        ctx.affine_vars = []
         index_exprs = []
         slice = (
             node.slice if isinstance(node.slice, ast.Tuple) else node.slice.value
@@ -461,8 +463,6 @@ class ASTTransformer(Builder):
                 ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
             )
             load_op.attributes["from"] = StringAttr.get(node.value.id)
-            ctx.dim_count = 0
-            ctx.affine_vars = []
             return load_op
         else:
             raise RuntimeError("Unsupported Subscript")
