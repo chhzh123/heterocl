@@ -68,6 +68,7 @@ def wrapped_apply(fn):
         with get_context(), get_location():
             res = fn(*args, **kwargs)
         _mlir_lower_pipeline(args[0].module)
+        args[0].primitive_sequences.append((fn.__name__, args[1:], kwargs))
         return res
 
     return wrapper
@@ -85,9 +86,7 @@ class Schedule:
         self.module = module
         self.top_func = top_func
         self.ip = ip
-
-    def __repr__(self):
-        return str(self.module)
+        self.primitive_sequences = []
 
     @wrapped_apply
     def split(self, name, factor):
@@ -211,10 +210,33 @@ class Schedule:
                 if func.name.value == func_to_replace.name.value:
                     func.move_before(self.module.body.operations[0])
             # Need to update CallOp arguments since some of them may be partitioned
-            # for op in self.top_func.entry_block.operations:
-            #     if isinstance(op, func_d.CallOp) and str(op.attributes["callee"])[1:] == func_to_replace.name.value:
-            #         for arg in op.operands:
-            #             arg.set_type(func_to_replace.type)
+            # We simply replay all the primitives and find the `partition`
+            for primitive in sch.primitive_sequences:
+                if primitive[0] == "partition":
+                    args, kwargs = primitive[1:]
+                    if len(args) != 0:
+                        target = args[0]
+                    else:
+                        target = kwargs["target"]
+                    arg_idx = -1
+                    for idx, arg in enumerate(sch.top_func.arguments):
+                        if arg == target.result:
+                            arg_idx = idx
+                            break
+                    else:
+                        raise RuntimeError("Target not found")
+                    for op in self.top_func.entry_block.operations:
+                        if (
+                            isinstance(op, func_d.CallOp)
+                            and str(op.attributes["callee"])[1:]
+                            == func_to_replace.name.value
+                        ):
+                            from .ir.builder import MockArg
+
+                            self.partition(
+                                MockArg(op.operands[arg_idx]), *args[1:], **kwargs
+                            )
+                            break
 
     def build(self, target=None):
         if target is None or target == "llvm":
