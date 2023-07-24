@@ -552,7 +552,10 @@ class ASTTransformer(Builder):
         # Build return type
         output_types = []
         output_typehints = []
-        if not (isinstance(node.returns, ast.Constant) and node.returns.value is None):
+        if not (
+            (isinstance(node.returns, ast.Constant) and node.returns.value is None)
+            or node.returns is None
+        ):
             output_type, extra_type_hint = build_type(node.returns)
             output_types.append(output_type)
             output_typehints.append(extra_type_hint)
