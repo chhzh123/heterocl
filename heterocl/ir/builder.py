@@ -336,15 +336,20 @@ class ASTTransformer(Builder):
                 node.slice if isinstance(node.slice, ast.Tuple) else node.slice.value
             )  # ast.Index
             elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
-            dim_count = len(elts)
+            dim_count = 0
             index_exprs = []
-            for index in range(dim_count):
-                index_exprs.append(AffineExpr.get_dim(index))
+            ivs = []
+            for elt in elts:
+                if isinstance(elt, ast.Constant):
+                    index_exprs.append(AffineConstantExpr.get(elt.value))
+                else:
+                    index_exprs.append(AffineExpr.get_dim(dim_count))
+                    ivs.append(ctx.induction_vars[elt.id])
+                    dim_count += 1
             affine_map = AffineMap.get(
                 dim_count=dim_count, symbol_count=0, exprs=index_exprs
             )
             affine_attr = AffineMapAttr.get(affine_map)
-            ivs = [ctx.induction_vars[x.id] for x in elts]
             if isinstance(ctx.buffers[node.value.id], MockScalar):
                 target = ctx.buffers[node.value.id].op.result
             else:
