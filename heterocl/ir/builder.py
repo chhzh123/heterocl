@@ -771,7 +771,8 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_Return(ctx, node):
-        return func_d.ReturnOp([ctx.buffers[node.value.id].result], ip=ctx.pop_ip())
+        ret = build_stmt(ctx, node.value)
+        return func_d.ReturnOp([ret.result], ip=ctx.pop_ip())
 
     @staticmethod
     def build_Expr(ctx, node):
