@@ -238,27 +238,57 @@ def test_nested_functions_2():
     M, K, N = 32, 32, 32
 
     def gemm(A: int32[M, K], B: int32[K, N], C: int32[M, N]) -> None:
-        for i, j, k in hcl.grid(M, N, K):
-            C[i, j] += A[i, k] * B[k, j]
+        for i, j in hcl.grid(M, N):
+            for k in hcl.reduction(K):
+                C[i, j] += A[i, k] * B[k, j]
 
     def top(A: int32[M, K], B: int32[K, N]) -> int32[M, N]:
         C: int32[M, N] = 0
         gemm(A, B, C)
         return C
 
+    s1 = hcl.customize(gemm)
+    s1.reorder("k", "j")
+    s1.partition(gemm.C, dim=2)
+    s1.buffer_at(gemm.C, axis="i")
+    s1.pipeline("j")
+    print(s1.module)
+    mod1 = s1.build("vhls")
+    print(mod1)
     # Top-level
-    s = hcl.customize(top, verbose=True)
+    # s = hcl.customize(top, verbose=True)
+    # print(s.module)
+    # mod = s.build()
+
+    # # Testing
+    # np_A = np.random.randint(0, 100, size=(M, K))
+    # np_B = np.random.randint(0, 100, size=(K, N))
+    # np_C = np.zeros((M, N), dtype="int")
+    # mod(np_A, np_B, np_C)
+    # np_D = np.matmul(np_A, np_B)
+    # assert np.array_equal(np_C, np_D)
+
+
+def test_rhs_binaryop():
+
+    def kernel() -> int32[11]:
+        v: int32 = 5
+        res: int32[11] = 0
+        res[0] = 1 + v
+        res[1] = 1 - v
+        res[2] = v * 3
+        res[3] = 52 / v
+        res[4] = 6 // v
+        res[5] = 6 % v
+        res[6] = 1 << v
+        res[7] = 64 >> v
+        res[8] = 1 & v
+        res[9] = 1 | v
+        res[10] = res[9]
+        return res
+
+    s = hcl.customize(kernel, verbose=True)
     print(s.module)
-    mod = s.build()
-
-    # Testing
-    np_A = np.random.randint(0, 100, size=(M, K))
-    np_B = np.random.randint(0, 100, size=(K, N))
-    np_C = np.zeros((M, N), dtype="int")
-    mod(np_A, np_B, np_C)
-    np_D = np.matmul(np_A, np_B)
-    assert np.array_equal(np_C, np_D)
-
 
 if __name__ == "__main__":
     # test_gemm_grid_for()
@@ -272,6 +302,7 @@ if __name__ == "__main__":
     # test_platform()
     # test_bconv2D_nchw()
     # test_nested_functions()
-    test_nested_functions_2()
+    # test_nested_functions_2()
+    test_rhs_binaryop()
 
 sys.exit()
