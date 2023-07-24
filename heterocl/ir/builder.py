@@ -339,7 +339,7 @@ class ASTTransformer(Builder):
             ctx.dim_count = 0
             index_exprs = []
             for index in elts:
-                index_exprs.append(ASTTransformer.build_affine_exp(ctx, index))
+                index_exprs.append(ASTTransformer.build_affine_expr(ctx, index))
             affine_map = AffineMap.get(
                 dim_count=ctx.dim_count, symbol_count=0, exprs=index_exprs
             )
@@ -412,18 +412,13 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_affine_expr(ctx, node):
-        # TODO
-        return AffineExpr.get_dim(list(ctx.induction_vars.keys()).index(node.id))
-
-    @staticmethod
-    def build_affine_exp(ctx, node):
         if isinstance(node, ast.Name):
             ctx.dim_count += 1
             ctx.affine_vars.append(node.id)
             return AffineExpr.get_dim(ctx.dim_count - 1)
         elif isinstance(node, ast.BinOp):
-            lhs = ASTTransformer.build_affine_exp(ctx, node.left)
-            rhs = ASTTransformer.build_affine_exp(ctx, node.right)
+            lhs = ASTTransformer.build_affine_expr(ctx, node.left)
+            rhs = ASTTransformer.build_affine_expr(ctx, node.right)
             op = {
                 ast.Add: lambda l, r: l + r,
                 ast.Sub: lambda l, r: l - r,
@@ -454,7 +449,7 @@ class ASTTransformer(Builder):
         )  # ast.Index
         elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
         for index in elts:
-            index_exprs.append(ASTTransformer.build_affine_exp(ctx, index))
+            index_exprs.append(ASTTransformer.build_affine_expr(ctx, index))
         ip = ctx.get_ip()
         if isinstance(node.ctx, ast.Load):
             affine_map = AffineMap.get(
