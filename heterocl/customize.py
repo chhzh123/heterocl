@@ -88,6 +88,10 @@ class Schedule:
         self.ip = ip
         self.primitive_sequences = []
 
+    def __repr__(self):
+        # Used for Module.parse
+        return str(self.module)
+
     @wrapped_apply
     def split(self, name, factor):
         band_name = get_loop_band_names(self.top_func)[0]

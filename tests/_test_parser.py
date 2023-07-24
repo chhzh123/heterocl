@@ -249,26 +249,66 @@ def test_nested_functions_2():
 
     s1 = hcl.customize(gemm)
     s1.reorder("k", "j")
-    # s1.partition(gemm.C, dim=2)
+    s1.partition(gemm.C, dim=2)
     s1.buffer_at(gemm.C, axis="i")
     s1.pipeline("j")
     # Top-level
     s = hcl.customize(top, verbose=True)
     s.compose(s1)
     print(s.module)
-    # mod = s.build()
+    mod = s.build()
 
-    # # Testing
-    # np_A = np.random.randint(0, 100, size=(M, K))
-    # np_B = np.random.randint(0, 100, size=(K, N))
-    # np_C = np.zeros((M, N), dtype="int")
-    # mod(np_A, np_B, np_C)
-    # np_D = np.matmul(np_A, np_B)
-    # assert np.array_equal(np_C, np_D)
+    # Testing
+    np_A = np.random.randint(0, 100, size=(M, K))
+    np_B = np.random.randint(0, 100, size=(K, N))
+    np_C = np.zeros((M, N), dtype="int")
+    mod(np_A, np_B, np_C)
+    np_D = np.matmul(np_A, np_B)
+    assert np.array_equal(np_C, np_D)
+    print("Success!")
+
+
+def test_nested_functions_3():
+    M = 1024
+    N = 1024
+    K = 1024
+
+    def gemm(inp: float32[M, K], W: float32[K, N], B: float32[N]) -> float32[M, N]:
+        outp: float32[M, N] = 0.0
+        # This code can be Executed correctly
+        # for i in range(M):
+        #     for j in range(N):
+        #         v: float32 = 0.0
+        #         for k in hcl.reduction(K):
+        #             v += inp[i, k] * W[k, j]
+        #         outp[i, j] = v + B[j]
+        # return outp
+        # if I write in this way, it would report "RuntimeError: Failure while executing pass pipeline":
+        # for i in range(M):
+        #     for j in range(N):
+        #         for k in hcl.reduction(K):
+        #             outp[i, j] += inp[i, k] * W[k, j]
+        #         outp[i, j] += B[j]
+        # return outp
+
+        # In addition, if there are other for construction, it would also report the same issue, such as:
+        for i in range(M):
+            for j in range(N):
+                outp[i, j] = B[j]
+        for i in range(M):
+            for j in range(N):
+                for k in hcl.reduction(K):
+                    outp[i, j] += inp[i, k] * W[k, j]
+        return outp
+
+    s = hcl.customize(gemm)
+    print(s.module)
+    f = s.build(target="vhls")
+    print(f)
+    return f
 
 
 def test_rhs_binaryop():
-
     def kernel() -> int32[11]:
         v: int32 = 5
         res: int32[11] = 0
@@ -288,6 +328,7 @@ def test_rhs_binaryop():
     s = hcl.customize(kernel, verbose=True)
     print(s.module)
 
+
 if __name__ == "__main__":
     # test_gemm_grid_for()
     # test_gemm_range_for()
@@ -301,6 +342,7 @@ if __name__ == "__main__":
     # test_bconv2D_nchw()
     # test_nested_functions()
     test_nested_functions_2()
+    # test_nested_functions_3()
     # test_rhs_binaryop()
 
 sys.exit()
