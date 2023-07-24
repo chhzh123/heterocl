@@ -329,20 +329,35 @@ def test_rhs_binaryop():
     print(s.module)
 
 
+def test_fcompute_function_wrapper():
+    def kernel(A: int32[10]) -> int32[10]:
+        def foo(x: int32) -> int32:
+            y: int32 = 0
+            y = x + 1
+            return y
+
+        B: int32[10] = 0
+        for i in range(10):
+            B[i] = foo(A[i])
+        return B
+
+    s = hcl.customize(kernel)
+    print(s.module)
+
+
 if __name__ == "__main__":
-    # test_gemm_grid_for()
-    # test_gemm_range_for()
-    # test_gemm_reduction_var()
-    # test_gemm_float()
-    # test_nested_if()
-    # test_buffer_at()
-    # test_conv2D()
-    # test_interleaving_acc()
-    # test_platform()
-    # test_bconv2D_nchw()
+    test_gemm_grid_for()
+    test_gemm_range_for()
+    test_gemm_reduction_var()
+    test_gemm_float()
+    test_nested_if()
+    test_buffer_at()
+    test_conv2D()
+    test_interleaving_acc()
     # test_nested_functions()
     test_nested_functions_2()
-    # test_nested_functions_3()
-    # test_rhs_binaryop()
+    test_nested_functions_3()
+    test_rhs_binaryop()
+    test_fcompute_function_wrapper()
 
 sys.exit()

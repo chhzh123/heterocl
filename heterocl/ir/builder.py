@@ -384,8 +384,9 @@ class ASTTransformer(Builder):
         if isinstance(rhs, func_d.CallOp):
             if len(node.targets) > 1:
                 raise RuntimeError("Cannot support multiple results yet")
-            ctx.buffers[node.targets[0].id] = rhs
-            return rhs
+            if isinstance(node.targets[0], ast.Name):
+                ctx.buffers[node.targets[0].id] = rhs
+                return rhs
         # Store LHS
         store_op = ASTTransformer.build_store(ctx, node.targets[0], rhs)
         return store_op
@@ -507,6 +508,15 @@ class ASTTransformer(Builder):
 
     @staticmethod
     def build_FunctionDef(ctx, node):
+        if ctx.top_func is not None:
+            # Nested function def
+            # Create a new context to avoid name collision
+            old_ctx = ctx
+            ctx = ASTContext(global_vars=ctx.global_vars)
+            ctx.set_ip(old_ctx.top_func)
+        else:
+            old_ctx = None
+
         ip = ctx.get_ip()
         filename, lineno = get_src_loc()
         loc = Location.file(filename, lineno, 0)
@@ -566,6 +576,11 @@ class ASTTransformer(Builder):
         stmts = build_stmts(ctx, node.body)
         if not isinstance(stmts[-1], func_d.ReturnOp):
             func_d.ReturnOp([], ip=ctx.pop_ip())
+        # Recover the old context
+        if old_ctx is not None:
+            ctx = old_ctx
+        # Add the built function to global variable for later reference
+        ctx.global_vars[node.name] = func_op
         return func_op
 
     @staticmethod
@@ -715,21 +730,25 @@ class ASTTransformer(Builder):
             else:
                 # Build subfunction
                 func = ctx.global_vars[node.func.id]
-                src, start_lineno = inspect.getsourcelines(func)
-                src = [textwrap.fill(line, tabsize=4, width=9999) for line in src]
-                src = textwrap.dedent("\n".join(src))
-                tree = ast.parse(src)
-                # Create a new context to avoid name collision
-                func_ctx = ASTContext(global_vars=ctx.global_vars)
-                func_ctx.set_ip(ctx.top_func)
-                stmts = build_stmts(func_ctx, tree.body)
-                func_ctx.pop_ip()
+                if isinstance(func, func_d.FuncOp):
+                    # Has already been defined in the top-level scope
+                    stmts = [func]
+                else:
+                    src, start_lineno = inspect.getsourcelines(func)
+                    src = [textwrap.fill(line, tabsize=4, width=9999) for line in src]
+                    src = textwrap.dedent("\n".join(src))
+                    tree = ast.parse(src)
+                    # Create a new context to avoid name collision
+                    func_ctx = ASTContext(global_vars=ctx.global_vars)
+                    func_ctx.set_ip(ctx.top_func)
+                    stmts = build_stmts(func_ctx, tree.body)
+                    func_ctx.pop_ip()
                 # Build call function in the top-level
-                inputs = [ctx.buffers[arg.id].result for arg in node.args]
+                new_args = [stmt.result for stmt in build_stmts(ctx, node.args)]
                 call_op = func_d.CallOp(
                     stmts[-1].type.results,
                     FlatSymbolRefAttr.get(node.func.id),
-                    inputs,
+                    new_args,
                     ip=ctx.get_ip(),
                 )
                 return call_op
