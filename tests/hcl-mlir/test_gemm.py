@@ -107,15 +107,24 @@ def test_gemm_outline(M=32, N=32, K=32, dtype=hcl.Int(), target=None):
 
     # optimization
     s_C = gemm.C
-    i0, i1 = s[s_C].split(s_C.axis[0], 8)
-    j0, j1 = s[s_C].split(s_C.axis[1], 8)
-    s[s_C].reorder(i0, j0, i1, j1)
-    s[s_C].unroll(j1)
-    s[s_C].pipeline(i1)
-    # s.outline(s[s_C])
-    print(hcl.lower(s))
+    # i0, i1 = s[s_C].split(s_C.axis[0], 8)
+    # j0, j1 = s[s_C].split(s_C.axis[1], 8)
+    # s[s_C].reorder(i0, j0, i1, j1)
+    # s[s_C].unroll(j1)
+    # s[s_C].pipeline(i1)
+    s.outline(s[s_C])
+    # print(hcl.lower(s))
 
-    f = hcl.build(s, "vhls")
+    f = hcl.build(s)
+    hcl_A = hcl.asarray(np.random.randint(10, size=(M, K)))
+    hcl_B = hcl.asarray(np.random.randint(10, size=(K, N)))
+    hcl_C = hcl.asarray(np.zeros((M, N)))
+    f(hcl_A, hcl_B, hcl_C)
+    golden = np.matmul(hcl_A.asnumpy(), hcl_B.asnumpy())
+    if np.allclose(golden, hcl_C.asnumpy()):
+        print("test_gemm passed")
+    else:
+        print("test_gemm failed")
     print(f)
 
 
@@ -146,8 +155,8 @@ def test_gemm_buffer(M=32, N=32, K=32, dtype=hcl.Int(), target=None):
 
 
 if __name__ == "__main__":
-    test_gemm_cpu()
+    # test_gemm_cpu()
     # test_gemm_fpga()
     # test_gemm_ihls()
-    # test_gemm_outline()
+    test_gemm_outline()
     # test_gemm_buffer()
