@@ -249,15 +249,13 @@ def test_nested_functions_2():
 
     s1 = hcl.customize(gemm)
     s1.reorder("k", "j")
-    s1.partition(gemm.C, dim=2)
+    # s1.partition(gemm.C, dim=2)
     s1.buffer_at(gemm.C, axis="i")
     s1.pipeline("j")
-    print(s1.module)
-    mod1 = s1.build("vhls")
-    print(mod1)
     # Top-level
-    # s = hcl.customize(top, verbose=True)
-    # print(s.module)
+    s = hcl.customize(top, verbose=True)
+    s.compose(s1)
+    print(s.module)
     # mod = s.build()
 
     # # Testing
@@ -302,7 +300,7 @@ if __name__ == "__main__":
     # test_platform()
     # test_bconv2D_nchw()
     # test_nested_functions()
-    # test_nested_functions_2()
-    test_rhs_binaryop()
+    test_nested_functions_2()
+    # test_rhs_binaryop()
 
 sys.exit()

@@ -16,8 +16,11 @@ from hcl_mlir.ir import (
     F32Type,
     MemRefType,
 )
-from hcl_mlir.dialects import hcl as hcl_d
-from hcl_mlir.dialects import memref as memref_d
+from hcl_mlir.dialects import (
+    hcl as hcl_d,
+    memref as memref_d,
+    func as func_d,
+)
 from hcl_mlir.exceptions import (
     HCLValueError,
 )
@@ -192,6 +195,26 @@ class Schedule:
         if len(new_reuse_buffers) != 1:
             raise RuntimeError("Reuse buffer not found")
         return new_reuse_buffers[0]
+
+    @wrapped_apply
+    def compose(self, *schs):
+        for sch in schs:
+            if not isinstance(sch, Schedule):
+                raise TypeError("The first argument must be a Schedule object")
+            func_to_replace = sch.top_func
+            for func in self.module.body.operations:
+                if func.name.value == func_to_replace.name.value:
+                    func.operation.erase()
+                    break
+            new_mod = Module.parse(str(sch.top_func))
+            for func in new_mod.body.operations:
+                if func.name.value == func_to_replace.name.value:
+                    func.move_before(self.module.body.operations[0])
+            # Need to update CallOp arguments since some of them may be partitioned
+            # for op in self.top_func.entry_block.operations:
+            #     if isinstance(op, func_d.CallOp) and str(op.attributes["callee"])[1:] == func_to_replace.name.value:
+            #         for arg in op.operands:
+            #             arg.set_type(func_to_replace.type)
 
     def build(self, target=None):
         if target is None or target == "llvm":
