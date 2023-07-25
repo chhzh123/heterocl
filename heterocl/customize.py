@@ -142,6 +142,31 @@ class Schedule:
         hcl_d.ReorderOp(arg_results, ip=self.ip)
 
     @wrapped_apply
+    def unroll(self, name, factor=0):
+        band_name = get_loop_band_names(self.top_func)[0]
+        op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
+        loop_hdl = hcl_d.CreateLoopHandleOp(
+            op_hdl.result, StringAttr.get(name), ip=self.ip
+        )
+        i32 = IntegerType.get_unsigned(32)
+        factor = IntegerAttr.get(i32, factor)
+        hcl_d.UnrollOp(loop_hdl.result, factor=factor, ip=self.ip)
+
+    @wrapped_apply
+    def fuse(self, *args):
+        band_name = get_loop_band_names(self.top_func)[0]
+        op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
+        loop_hdls = []
+        for name in args:
+            loop_hdls.append(
+                hcl_d.CreateLoopHandleOp(
+                    op_hdl.result, StringAttr.get(name), ip=self.ip
+                )
+            )
+        arg_results = [arg.result for arg in loop_hdls]
+        hcl_d.FuseOp(arg_results, ip=self.ip)
+
+    @wrapped_apply
     def partition(self, target, partition_type=Partition.Complete, dim=0, factor=0):
         if partition_type > 2:
             raise HCLValueError("Invalid partition type")
@@ -181,6 +206,12 @@ class Schedule:
         hcl_d.BufferAtOp(memref_type, target.result, loop_hdl.result, ip=self.ip)
 
     @wrapped_apply
+    def reshape(self, target, shape):
+        eletype = MemRefType(target.result.type).element_type
+        memref_type = MemRefType.get(shape, eletype)
+        hcl_d.ReshapeOp(memref_type, target.result, ip=self.ip)
+
+    @wrapped_apply
     def pipeline(self, axis, initiation_interval=1):
         i32 = IntegerType.get_unsigned(32)
         ii = IntegerAttr.get(i32, initiation_interval)
@@ -190,6 +221,20 @@ class Schedule:
             op_hdl.result, StringAttr.get(axis), ip=self.ip
         )
         hcl_d.PipelineOp(loop_hdl.result, ii=ii, ip=self.ip)
+
+    @wrapped_apply
+    def parallel(self, axis):
+        band_name = get_loop_band_names(self.top_func)[0]
+        op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
+        loop_hdl = hcl_d.CreateLoopHandleOp(
+            op_hdl.result, StringAttr.get(axis), ip=self.ip
+        )
+        hcl_d.ParallelOp(loop_hdl.result, ip=self.ip)
+
+    @wrapped_apply
+    def compute_at(self, from_band, target_band):
+        # TODO: Need to think more about how to describe the compute_at semantics
+        raise NotImplementedError
 
     @wrapped_apply
     def reuse_at(self, target, axis):

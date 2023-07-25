@@ -135,6 +135,22 @@ def test_buffer_at():
     print(s.module)
 
 
+def test_schedule():
+    def gemm(A: int32[32, 32], B: int32[32, 32]) -> int32[32, 32]:
+        C: int32[32, 32] = 0
+        for i, j, k in hcl.grid(32, 32, 32):
+            C[i, j] += A[i, k] * B[k, j]
+        return C
+
+    s = hcl.customize(gemm)
+    # Some meaningless schedules, not used for execution
+    s.fuse("i", "j", "k")
+    s.unroll("i_j_k_fused")
+    s.reshape(gemm.A, (32, 4, 8))
+    s.parallel("i_j_k_fused")
+    print(s.module)
+
+
 def test_conv2D():
     def conv2D(A: int32[10, 10]) -> int32[8, 8]:
         B: int32[8, 8] = 0
@@ -422,21 +438,22 @@ def test_index_arg():
 
 
 if __name__ == "__main__":
-    test_gemm_grid_for()
-    test_gemm_range_for()
-    test_gemm_reduction_var()
-    test_gemm_float()
-    test_nested_if()
-    test_buffer_at()
-    test_conv2D()
-    test_interleaving_acc()
-    test_nested_functions()
-    test_nested_functions_2()
-    test_nested_functions_3()
-    test_rhs_binaryop()
-    test_fcompute_function_wrapper()
-    test_llvm_arg()
-    test_index_arg()
-    test_fcompute_wrap_more()
+    # test_gemm_grid_for()
+    # test_gemm_range_for()
+    # test_gemm_reduction_var()
+    # test_gemm_float()
+    # test_nested_if()
+    # test_buffer_at()
+    test_schedule()
+    # test_conv2D()
+    # test_interleaving_acc()
+    # test_nested_functions()
+    # test_nested_functions_2()
+    # test_nested_functions_3()
+    # test_rhs_binaryop()
+    # test_fcompute_function_wrapper()
+    # test_llvm_arg()
+    # test_index_arg()
+    # test_fcompute_wrap_more()
 
 sys.exit()
