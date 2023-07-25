@@ -39,7 +39,7 @@ import numpy as np
 from .ir.builder import ASTTransformer, ASTContext
 from .context import get_context, set_context, get_location
 from .ir.transform import get_loop_band_names
-from .build_module import _mlir_lower_pipeline, build_llvm
+from .build_module import _mlir_lower_pipeline
 from .runtime import copy_build_files
 from .module import HCLModule
 
@@ -345,36 +345,79 @@ class LLVMModule:
         input_types = self.top_func_type.inputs
         new_args = []
         for arg, in_type in zip(args, input_types):
-            np_type = np_type_to_str(arg.dtype)
-            target_type = str(MemRefType(in_type).element_type)
-            if np_type != target_type:
-                raise RuntimeError(
-                    "Input type mismatch: {} vs {}".format(np_type, target_type)
+            if not isinstance(arg, np.ndarray):
+                if isinstance(arg, int):
+                    if str(in_type) != "i32":
+                        raise RuntimeError(
+                            "Input type mismatch, expected i32, but got {}".format(
+                                str(in_type)
+                            )
+                        )
+                    c_int_p = ctypes.c_int * 1
+                    new_args.append(c_int_p(arg))
+                elif isinstance(arg, float):
+                    if str(in_type) != "f32":
+                        raise RuntimeError(
+                            "Input type mismatch, expected f32, but got {}".format(
+                                str(in_type)
+                            )
+                        )
+                    c_float_p = ctypes.c_float * 1
+                    new_args.append(c_float_p(arg))
+                else:
+                    raise RuntimeError("Unsupported input type")
+            else:
+                np_type = np_type_to_str(arg.dtype)
+                target_type = str(MemRefType(in_type).element_type)
+                if np_type != target_type:
+                    raise RuntimeError(
+                        "Input type mismatch: {} vs {}".format(np_type, target_type)
+                    )
+                new_args.append(
+                    ctypes.pointer(ctypes.pointer(get_ranked_memref_descriptor(arg)))
                 )
-            new_args.append(
-                ctypes.pointer(ctypes.pointer(get_ranked_memref_descriptor(arg)))
-            )
         # TODO: only support one return value for now
         result_types = self.top_func_type.results
         if len(result_types) != 1:
             raise RuntimeError("Only support one return value for now")
-        result_type = MemRefType(result_types[0])
-        shape = result_type.shape
-        result_type = result_type.element_type
-        if str(result_type) == "f32":
-            dtype = ctypes.c_float
-        elif str(result_type) == "f64":
-            dtype = ctypes.c_double
-        elif str(result_type) == "i32":
-            dtype = ctypes.c_int32
-        elif str(result_type) == "i64":
-            dtype = ctypes.c_int64
+        if MemRefType.isinstance(result_types[0]):
+            result_type = MemRefType(result_types[0])
+            shape = result_type.shape
+            result_type = result_type.element_type
+            if str(result_type) == "f32":
+                dtype = ctypes.c_float
+            elif str(result_type) == "f64":
+                dtype = ctypes.c_double
+            elif str(result_type) == "i32":
+                dtype = ctypes.c_int32
+            elif str(result_type) == "i64":
+                dtype = ctypes.c_int64
+            else:
+                raise RuntimeError("Unsupported return type")
+            return_desc = make_nd_memref_descriptor(len(shape), dtype)()
+            return_tensor = ctypes.pointer(ctypes.pointer(return_desc))
+        elif IntegerType.isinstance(result_types[0]):
+            result_type = IntegerType(result_types[0])
+            if str(result_type) == "i32":
+                dtype = ctypes.c_int32
+            elif str(result_type) == "i64":
+                dtype = ctypes.c_int64
+            else:
+                raise RuntimeError("Unsupported return type")
+            dtype_p = dtype * 1
+            return_tensor = dtype_p(-1)
+        elif F32Type.isinstance(result_types[0]):
+            result_type = F32Type(result_types[0])
+            dtype_p = ctypes.c_float * 1
+            return_tensor = dtype_p(-1.0)
         else:
             raise RuntimeError("Unsupported return type")
-        return_desc = make_nd_memref_descriptor(len(shape), dtype)()
-        return_tensor = ctypes.pointer(ctypes.pointer(return_desc))
-        self.execution_engine.invoke(self.top_func_name, return_tensor, *new_args)
-        ret = ranked_memref_to_numpy(return_tensor[0])
+        if MemRefType.isinstance(result_types[0]):
+            self.execution_engine.invoke(self.top_func_name, return_tensor, *new_args)
+            ret = ranked_memref_to_numpy(return_tensor[0])
+        else:
+            self.execution_engine.invoke(self.top_func_name, *new_args, return_tensor)
+            ret = return_tensor[0]
         return ret
 
 

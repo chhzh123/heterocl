@@ -364,6 +364,22 @@ def test_fcompute_function_wrapper():
     assert np.array_equal(np_B, np_C)
 
 
+def test_llvm_arg():
+    def kernel(A: float32[10], B: int32, C: float32) -> float32:
+        v: float32 = 0.0
+        v = A[0] + float(B) + C
+        return v
+
+    s = hcl.customize(kernel)
+    print(s.module)
+    mod = s.build()
+    np_A = np.random.random((10,)).astype(np.float32)
+    B = 1
+    C = 2.0
+    hcl_B = mod(np_A, B, C)
+    np.testing.assert_allclose(hcl_B, np_A[0] + 3.0)
+
+
 if __name__ == "__main__":
     test_gemm_grid_for()
     test_gemm_range_for()
@@ -378,5 +394,6 @@ if __name__ == "__main__":
     test_nested_functions_3()
     test_rhs_binaryop()
     test_fcompute_function_wrapper()
+    test_llvm_arg()
 
 sys.exit()
