@@ -11,6 +11,7 @@ from hcl_mlir.ir import (
     FunctionType,
     MemRefType,
     IntegerType,
+    IndexType,
     F32Type,
     UnitAttr,
     IntegerAttr,
@@ -415,9 +416,16 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_affine_expr(ctx, node):
         if isinstance(node, ast.Name):
-            ctx.dim_count += 1
-            ctx.affine_vars.append(node.id)
-            return AffineExpr.get_dim(ctx.dim_count - 1)
+            if node.id in ctx.induction_vars or (
+                node.id in ctx.buffers
+                and isinstance(ctx.buffers[node.id], MockArg)
+                and str(ctx.buffers[node.id].result.type) == "index"
+            ):
+                ctx.dim_count += 1
+                ctx.affine_vars.append(node.id)
+                return AffineExpr.get_dim(ctx.dim_count - 1)
+            else:
+                return None
         elif isinstance(node, ast.BinOp):
             lhs = ASTTransformer.build_affine_expr(ctx, node.left)
             rhs = ASTTransformer.build_affine_expr(ctx, node.right)
@@ -451,22 +459,46 @@ class ASTTransformer(Builder):
             node.slice if isinstance(node.slice, ast.Tuple) else node.slice.value
         )  # ast.Index
         elts = slice.elts if isinstance(slice, ast.Tuple) else [slice]
+        is_affine = True
         for index in elts:
-            index_exprs.append(ASTTransformer.build_affine_expr(ctx, index))
-        ip = ctx.get_ip()
-        if isinstance(node.ctx, ast.Load):
-            affine_map = AffineMap.get(
-                dim_count=ctx.dim_count, symbol_count=0, exprs=index_exprs
-            )
-            affine_attr = AffineMapAttr.get(affine_map)
-            ivs = [ctx.buffers[x].result for x in ctx.affine_vars]
-            load_op = affine_d.AffineLoadOp(
-                ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ip
+            expr = ASTTransformer.build_affine_expr(ctx, index)
+            if expr is None:
+                is_affine = False
+                break
+            else:
+                index_exprs.append(expr)
+        if is_affine:
+            if isinstance(node.ctx, ast.Load):
+                affine_map = AffineMap.get(
+                    dim_count=ctx.dim_count, symbol_count=0, exprs=index_exprs
+                )
+                affine_attr = AffineMapAttr.get(affine_map)
+                ivs = [ctx.buffers[x].result for x in ctx.affine_vars]
+                load_op = affine_d.AffineLoadOp(
+                    ctx.buffers[node.value.id].result, ivs, affine_attr, ip=ctx.get_ip()
+                )
+                load_op.attributes["from"] = StringAttr.get(node.value.id)
+                return load_op
+            else:
+                raise RuntimeError("Unsupported Subscript")
+        else:  # Not affine
+            new_indices = []
+            for index in elts:
+                expr = build_stmt(ctx, index)
+                # cast to index type
+                expr_res = expr.result
+                if str(expr_res.type) == "i32":
+                    expr = arith_d.IndexCastOp(
+                        IndexType.get(), expr_res, ip=ctx.get_ip()
+                    )
+                else:
+                    raise RuntimeError(f"Unsupported index type, got {expr.type}")
+                new_indices.append(expr)
+            load_op = memref_d.LoadOp(
+                ctx.buffers[node.value.id].result, new_indices, ip=ctx.get_ip()
             )
             load_op.attributes["from"] = StringAttr.get(node.value.id)
             return load_op
-        else:
-            raise RuntimeError("Unsupported Subscript")
 
     @staticmethod
     def build_AnnAssign(ctx, node):

@@ -342,6 +342,11 @@ class LLVMModule:
             )
 
     def __call__(self, *args):
+        """
+        Reference:
+        * https://github.com/llvm/llvm-project/blob/llvmorg-15.0.0/mlir/test/python/execution_engine.py
+        * https://github.com/llvm/llvm-project/blob/llvmorg-15.0.0/mlir/test/Integration/Dialect/SparseTensor/python/test_SpMM.py
+        """
         input_types = self.top_func_type.inputs
         new_args = []
         for arg, in_type in zip(args, input_types):

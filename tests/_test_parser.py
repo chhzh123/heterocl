@@ -4,7 +4,7 @@
 import sys
 import numpy as np
 import heterocl as hcl
-from heterocl.ir.types import int1, int32, float32
+from heterocl.ir.types import int1, int32, float32, index
 
 
 def test_gemm_grid_for():
@@ -380,6 +380,47 @@ def test_llvm_arg():
     np.testing.assert_allclose(hcl_B, np_A[0] + 3.0)
 
 
+def test_fcompute_wrap_more():
+    def kernel(A: int32[10]) -> int32[10]:
+        def foo(x: index, A: int32[10]) -> int32:
+            y: int32 = 0
+            y = A[x] + 1
+            return y
+
+        B: int32[10] = 0
+        for i in range(10):
+            B[i] = foo(i, A)
+        return B
+
+    s = hcl.customize(kernel)
+    print(s.module)
+    mod = s.build()
+    np_A = np.random.randint(0, 10, size=(10,)).astype(np.int32)
+    np_C = np_A + 1
+    np_B = mod(np_A)
+    assert np.array_equal(np_B, np_C)
+
+
+def test_index_arg():
+    def kernel(A: int32[10]) -> int32[10]:
+        B: int32[10] = 0
+
+        def foo(A: int32[10], x: index) -> int32:
+            y: int32 = 0
+            C: int32[10] = 0
+            for i in range(10):
+                C[i] = A[i] + 1
+            y = C[x]
+            return y
+
+        for i in range(10):
+            B[i] = foo(A, i)
+        return B
+
+    s = hcl.customize(kernel)
+    print(s.module)
+
+
 if __name__ == "__main__":
     test_gemm_grid_for()
     test_gemm_range_for()
@@ -395,5 +436,7 @@ if __name__ == "__main__":
     test_rhs_binaryop()
     test_fcompute_function_wrapper()
     test_llvm_arg()
+    test_index_arg()
+    test_fcompute_wrap_more()
 
 sys.exit()
