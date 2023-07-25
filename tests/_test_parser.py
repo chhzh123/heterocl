@@ -151,6 +151,27 @@ def test_schedule():
     print(s.module)
 
 
+def test_multiband():
+    def kernel(A: int32[32, 32]) -> int32[32, 32]:
+        B: int32[32, 32] = 0
+        for i, j in hcl.grid(32, 32):
+            B[i, j] = A[i, j] + 1
+        C: int32[32, 32] = 0
+        for i, j in hcl.grid(32, 32):
+            C[i, j] = B[i, j] * 2
+        return C
+
+    s = hcl.customize(kernel)
+    loops = s.get_loops()
+    s.compute_at(loops[0]["j"], loops[1]["j"])
+    print(s.module)
+    mod = s.build()
+    np_A = np.random.randint(0, 10, size=(32, 32)).astype(np.int32)
+    np_C = (np_A + 1) * 2
+    np_B = mod(np_A)
+    assert np.array_equal(np_B, np_C)
+
+
 def test_conv2D():
     def conv2D(A: int32[10, 10]) -> int32[8, 8]:
         B: int32[8, 8] = 0
@@ -438,22 +459,23 @@ def test_index_arg():
 
 
 if __name__ == "__main__":
-    # test_gemm_grid_for()
-    # test_gemm_range_for()
-    # test_gemm_reduction_var()
-    # test_gemm_float()
-    # test_nested_if()
-    # test_buffer_at()
+    test_gemm_grid_for()
+    test_gemm_range_for()
+    test_gemm_reduction_var()
+    test_gemm_float()
+    test_nested_if()
+    test_buffer_at()
     test_schedule()
-    # test_conv2D()
-    # test_interleaving_acc()
-    # test_nested_functions()
-    # test_nested_functions_2()
-    # test_nested_functions_3()
-    # test_rhs_binaryop()
-    # test_fcompute_function_wrapper()
-    # test_llvm_arg()
-    # test_index_arg()
-    # test_fcompute_wrap_more()
+    test_multiband()
+    test_conv2D()
+    test_interleaving_acc()
+    test_nested_functions()
+    test_nested_functions_2()
+    test_nested_functions_3()
+    test_rhs_binaryop()
+    test_fcompute_function_wrapper()
+    test_llvm_arg()
+    test_index_arg()
+    test_fcompute_wrap_more()
 
 sys.exit()

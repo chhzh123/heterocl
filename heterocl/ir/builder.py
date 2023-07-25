@@ -61,6 +61,17 @@ class Builder:
             return method(ctx, node)
 
 
+class LoopScopeGuard:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.ctx.loop_band_count += 1
+
+
 class ASTContext:
     def __init__(self, global_vars):
         self.ip_stack = []
@@ -68,6 +79,7 @@ class ASTContext:
         self.induction_vars = {}
         self.top_func = None
         self.global_vars = global_vars
+        self.loop_band_count = 0
         # used for AffineExpr dim counting
         self.dim_count = 0
         self.affine_vars = []
@@ -82,6 +94,9 @@ class ASTContext:
 
     def pop_ip(self):
         return self.ip_stack.pop()
+
+    def loop_scope_guard(self):
+        return LoopScopeGuard(self)
 
 
 class MockOp:
@@ -162,6 +177,8 @@ class ASTTransformer(Builder):
             for x in node.iter.args
         ]
         names = [node.target.id]
+        # avoid name conflicts
+        names += [str(ctx.loop_band_count)]
         for_loops = build_for_loops(grid, ip, names)
         ivs = [loop.induction_variable for loop in for_loops]
         for name, iv in zip(names, ivs):
@@ -182,6 +199,8 @@ class ASTTransformer(Builder):
             names = [x.id for x in node.target.elts]
         else:
             names = [node.target.id]
+        # avoid name conflicts
+        names += [str(ctx.loop_band_count)]
         for_loops = build_for_loops(grid, ip, names)
         ivs = [loop.induction_variable for loop in for_loops]
         for name, iv in zip(names, ivs):
@@ -198,20 +217,23 @@ class ASTTransformer(Builder):
     def build_For(ctx, node):
         if node.orelse:
             raise RuntimeError("'else' clause for 'for' not supported in HCL kernels")
-        if (
-            isinstance(node.iter, ast.Call)
-            and isinstance(node.iter.func, ast.Name)
-            and node.iter.func.id == "range"
-        ):
-            return ASTTransformer.build_range_for(ctx, node)
-        elif (
-            isinstance(node.iter, ast.Call)
-            and isinstance(node.iter.func, ast.Attribute)
-            and (node.iter.func.attr == "grid" or node.iter.func.attr == "reduction")
-        ):
-            return ASTTransformer.build_grid_for(ctx, node)
-        else:
-            raise RuntimeError("Unsupported for loop")
+        with ctx.loop_scope_guard():
+            if (
+                isinstance(node.iter, ast.Call)
+                and isinstance(node.iter.func, ast.Name)
+                and node.iter.func.id == "range"
+            ):
+                return ASTTransformer.build_range_for(ctx, node)
+            elif (
+                isinstance(node.iter, ast.Call)
+                and isinstance(node.iter.func, ast.Attribute)
+                and (
+                    node.iter.func.attr == "grid" or node.iter.func.attr == "reduction"
+                )
+            ):
+                return ASTTransformer.build_grid_for(ctx, node)
+            else:
+                raise RuntimeError("Unsupported for loop")
 
     @staticmethod
     def build_general_binop(ctx, node, lhs, rhs):

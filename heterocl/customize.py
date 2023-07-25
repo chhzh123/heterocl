@@ -27,6 +27,7 @@ from hcl_mlir.exceptions import (
 )
 import os
 import ctypes
+from hcl_mlir import get_affine_loop_nests
 from hcl_mlir.passmanager import PassManager
 from hcl_mlir.execution_engine import ExecutionEngine
 from hcl_mlir.runtime import (
@@ -115,6 +116,12 @@ class Schedule:
     def __repr__(self):
         # Used for Module.parse
         return str(self.module)
+
+    def get_loops(self):
+        res = []
+        for loops in get_affine_loop_nests(self.top_func):
+            res.append({StringAttr(item["name"]).value: item["body"] for item in loops})
+        return res
 
     @wrapped_apply
     def split(self, name, factor):
@@ -232,9 +239,30 @@ class Schedule:
         hcl_d.ParallelOp(loop_hdl.result, ip=self.ip)
 
     @wrapped_apply
-    def compute_at(self, from_band, target_band):
-        # TODO: Need to think more about how to describe the compute_at semantics
-        raise NotImplementedError
+    def compute_at(self, from_loop, target_loop):
+        bands = get_affine_loop_nests(self.top_func)
+        from_band, target_band = None, None
+        for band in bands:
+            if "op_name" in band[0]["body"].attributes:
+                op_name = band[0]["body"].attributes["op_name"]
+            else:
+                op_name = ""
+            for loop in band:
+                loop = loop["body"]
+                if loop == from_loop:
+                    from_band = StringAttr(op_name)
+                    from_loop = StringAttr(loop.attributes["loop_name"])
+                elif loop == target_loop:
+                    target_band = StringAttr(op_name)
+                    target_loop = StringAttr(loop.attributes["loop_name"])
+        if target_band is None:
+            raise RuntimeError("Target loop not found")
+        from_hdl = hcl_d.CreateOpHandleOp(from_band, ip=self.ip)
+        target_hdl = hcl_d.CreateOpHandleOp(target_band, ip=self.ip)
+        loop_hdl = hcl_d.CreateLoopHandleOp(target_hdl.result, target_loop, ip=self.ip)
+        hcl_d.ComputeAtOp(
+            from_hdl.result, target_hdl.result, loop_hdl.result, ip=self.ip
+        )
 
     @wrapped_apply
     def reuse_at(self, target, axis):
