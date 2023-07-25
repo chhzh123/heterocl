@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from hcl_mlir.ir import (
     Module,
     InsertionPoint,
+    UnitAttr,
     StringAttr,
     IntegerType,
     IntegerAttr,
@@ -24,6 +25,16 @@ from hcl_mlir.dialects import (
 from hcl_mlir.exceptions import (
     HCLValueError,
 )
+import os
+import ctypes
+from hcl_mlir.passmanager import PassManager
+from hcl_mlir.execution_engine import ExecutionEngine
+from hcl_mlir.runtime import (
+    get_ranked_memref_descriptor,
+    make_nd_memref_descriptor,
+    ranked_memref_to_numpy,
+)
+import numpy as np
 
 from .ir.builder import ASTTransformer, ASTContext
 from .context import get_context, set_context, get_location
@@ -31,6 +42,19 @@ from .ir.transform import get_loop_band_names
 from .build_module import _mlir_lower_pipeline, build_llvm
 from .runtime import copy_build_files
 from .module import HCLModule
+
+
+def np_type_to_str(dtype):
+    if dtype == np.float32:
+        return "f32"
+    elif dtype == np.float64:
+        return "f64"
+    elif dtype == np.int32:
+        return "i32"
+    elif dtype == np.int64:
+        return "i64"
+    else:
+        raise RuntimeError("Unsupported dtype")
 
 
 def getsourcefile(obj):
@@ -246,7 +270,8 @@ class Schedule:
         if target is None or target == "llvm":
             target = "llvm"
             _mlir_lower_pipeline(self.module, lower_linalg=True)
-            return build_llvm(self, top_func_name=self.top_func.name.value)
+            mod = LLVMModule(self.module, top_func_name=self.top_func.name.value)
+            return mod
         elif target == "vhls":
             # FIXME: Handle linalg.fill
             _mlir_lower_pipeline(self.module, lower_linalg=True)
@@ -272,6 +297,82 @@ class Schedule:
             return hcl_module
         else:
             NotImplementedError("Target {} is not supported".format(target))
+
+
+class LLVMModule:
+    def __init__(self, mod, top_func_name):
+        # Copy the module to avoid modifying the original one
+        with get_context() as ctx, get_location():
+            self.module = Module.parse(str(mod), ctx)
+            # find top func op
+            func = None
+            for op in self.module.body.operations:
+                if isinstance(op, func_d.FuncOp) and op.name.value == top_func_name:
+                    func = op
+                    break
+            if func is None:
+                raise RuntimeError(
+                    "No top-level function found in the built MLIR module"
+                )
+            func.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+            func.attributes["top"] = UnitAttr.get()
+            self.top_func_type = func.type
+            self.top_func_name = top_func_name
+            pm = PassManager.parse(
+                "func.func(convert-linalg-to-affine-loops),lower-affine,convert-scf-to-cf,convert-arith-to-llvm,convert-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts"
+            )
+            pm.run(self.module)
+            # Add shared library
+            if os.getenv("LLVM_BUILD_DIR") is not None:
+                shared_libs = [
+                    os.path.join(
+                        os.getenv("LLVM_BUILD_DIR"), "lib", "libmlir_runner_utils.so"
+                    ),
+                    os.path.join(
+                        os.getenv("LLVM_BUILD_DIR"), "lib", "libmlir_c_runner_utils.so"
+                    ),
+                ]
+            else:
+                shared_libs = None
+            self.execution_engine = ExecutionEngine(
+                self.module, opt_level=3, shared_libs=shared_libs
+            )
+
+    def __call__(self, *args):
+        input_types = self.top_func_type.inputs
+        new_args = []
+        for arg, in_type in zip(args, input_types):
+            np_type = np_type_to_str(arg.dtype)
+            target_type = str(MemRefType(in_type).element_type)
+            if np_type != target_type:
+                raise RuntimeError(
+                    "Input type mismatch: {} vs {}".format(np_type, target_type)
+                )
+            new_args.append(
+                ctypes.pointer(ctypes.pointer(get_ranked_memref_descriptor(arg)))
+            )
+        # TODO: only support one return value for now
+        result_types = self.top_func_type.results
+        if len(result_types) != 1:
+            raise RuntimeError("Only support one return value for now")
+        result_type = MemRefType(result_types[0])
+        shape = result_type.shape
+        result_type = result_type.element_type
+        if str(result_type) == "f32":
+            dtype = ctypes.c_float
+        elif str(result_type) == "f64":
+            dtype = ctypes.c_double
+        elif str(result_type) == "i32":
+            dtype = ctypes.c_int32
+        elif str(result_type) == "i64":
+            dtype = ctypes.c_int64
+        else:
+            raise RuntimeError("Unsupported return type")
+        return_desc = make_nd_memref_descriptor(len(shape), dtype)()
+        return_tensor = ctypes.pointer(ctypes.pointer(return_desc))
+        self.execution_engine.invoke(self.top_func_name, return_tensor, *new_args)
+        ret = ranked_memref_to_numpy(return_tensor[0])
+        return ret
 
 
 def customize(fn, verbose=False):
