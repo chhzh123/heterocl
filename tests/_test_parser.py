@@ -157,8 +157,7 @@ def test_conv2D():
     mod = s.build()
 
     # testing
-    np_A = np.random.randint(0, 10, size=(10, 10))
-    np_B = np.zeros((8, 8), dtype="int")
+    np_A = np.random.randint(0, 10, size=(10, 10)).astype(np.int32)
     np_C = np.zeros((8, 8), dtype="int")
 
     for y in range(0, 8):
@@ -167,7 +166,7 @@ def test_conv2D():
                 for c in range(0, 3):
                     np_C[y][x] += np_A[y + r][x + c]
 
-    mod(np_A, np_B)
+    np_B = mod(np_A)
 
     assert np.array_equal(np_B, np_C)
 
@@ -366,18 +365,18 @@ def test_fcompute_function_wrapper():
 
 
 if __name__ == "__main__":
-    # test_gemm_grid_for()
-    # test_gemm_range_for()
-    # test_gemm_reduction_var()
-    # test_gemm_float()
-    # test_nested_if()
-    # test_buffer_at()
-    # test_conv2D()
-    # test_interleaving_acc()
-    # test_nested_functions()
+    test_gemm_grid_for()
+    test_gemm_range_for()
+    test_gemm_reduction_var()
+    test_gemm_float()
+    test_nested_if()
+    test_buffer_at()
+    test_conv2D()
+    test_interleaving_acc()
+    test_nested_functions()
     test_nested_functions_2()
-    # test_nested_functions_3()
-    # test_rhs_binaryop()
-    # test_fcompute_function_wrapper()
+    test_nested_functions_3()
+    test_rhs_binaryop()
+    test_fcompute_function_wrapper()
 
 sys.exit()
