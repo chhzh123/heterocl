@@ -260,10 +260,9 @@ def test_nested_functions_2():
     mod = s.build()
 
     # Testing
-    np_A = np.random.randint(0, 100, size=(M, K))
-    np_B = np.random.randint(0, 100, size=(K, N))
-    np_C = np.zeros((M, N), dtype="int")
-    mod(np_A, np_B, np_C)
+    np_A = np.random.randint(0, 100, size=(M, K)).astype(np.int32)
+    np_B = np.random.randint(0, 100, size=(K, N)).astype(np.int32)
+    np_C = mod(np_A, np_B)
     np_D = np.matmul(np_A, np_B)
     assert np.array_equal(np_C, np_D)
     print("Success!")
@@ -360,10 +359,9 @@ def test_fcompute_function_wrapper():
     s = hcl.customize(kernel)
     print(s.module)
     mod = s.build()
-    np_A = np.random.randint(0, 10, size=(10,))
-    np_B = np.zeros((10,), dtype="int")
+    np_A = np.random.randint(0, 10, size=(10,)).astype(np.int32)
     np_C = np_A + 1
-    mod(np_A, np_B)
+    np_B = mod(np_A)
     assert np.array_equal(np_B, np_C)
 
 
@@ -376,11 +374,10 @@ if __name__ == "__main__":
     # test_buffer_at()
     # test_conv2D()
     # test_interleaving_acc()
-    test_nested_functions()
-    # test_nested_functions_2()
+    # test_nested_functions()
+    test_nested_functions_2()
     # test_nested_functions_3()
     # test_rhs_binaryop()
-    # test_fcompute_function_wrapper()
     # test_fcompute_function_wrapper()
 
 sys.exit()

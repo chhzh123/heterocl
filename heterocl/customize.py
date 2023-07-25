@@ -318,6 +318,9 @@ class LLVMModule:
             func.attributes["top"] = UnitAttr.get()
             self.top_func_type = func.type
             self.top_func_name = top_func_name
+            # Remove .partition() annotation
+            hcl_d.remove_stride_map(self.module)
+            # Run through lowering passes
             pm = PassManager.parse(
                 "func.func(convert-linalg-to-affine-loops),lower-affine,convert-scf-to-cf,convert-arith-to-llvm,convert-memref-to-llvm,convert-func-to-llvm,convert-cf-to-llvm,reconcile-unrealized-casts"
             )
