@@ -23,7 +23,7 @@ class LoopBand:
         self.__setattr__(name, loop)
 
     def __repr__(self):
-        return "LoopBand({})".format(self.loops)
+        return "LoopBand({})".format(list(self.loops.keys()))
 
     def __iter__(self):
         return self.loops.items().__iter__()

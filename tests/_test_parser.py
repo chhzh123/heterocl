@@ -93,9 +93,7 @@ def test_nested_if():
 
 def test_interleaving_acc():
     # https://github.com/cornell-zhang/hcl-dialect/blob/v0.1/test/Transforms/memory/buffer_gemm.mlir#L86
-    M = 1024
-    N = 1024
-    K = 1024
+    M, N, K = 1024, 1024, 1024
 
     def gemm(A: float32[M, K], B: float32[K, N]) -> float32[M, N]:
         C: float32[M, N] = 0
@@ -105,10 +103,19 @@ def test_interleaving_acc():
         return C
 
     s = hcl.customize(gemm)
+    print(s.module)
     s.reorder("k", "j")
     s.buffer_at(gemm.C, axis="i")
     s.pipeline("j")
     print(s.module)
+
+    # CPU simulation
+    mod = s.build()
+    np_A = np.random.random((M, K)).astype(np.float32)
+    np_B = np.random.random((K, N)).astype(np.float32)
+    np_C = np.matmul(np_A, np_B)
+    np_C_hcl = mod(np_A, np_B)
+    np.testing.assert_allclose(np_C, np_C_hcl, rtol=1e-5)
     print(s.build(target="vhls"))
     return s
 
@@ -163,7 +170,7 @@ def test_multiband():
 
     s = hcl.customize(kernel)
     loops = s.get_loops()
-    s.compute_at(loops[0]["j"], loops[1]["j"])
+    s.compute_at(loops[0].j, loops[1].j)
     print(s.module)
     mod = s.build()
     np_A = np.random.randint(0, 10, size=(32, 32)).astype(np.int32)
@@ -239,8 +246,9 @@ def test_nested_functions():
 
     def gemm(A: int32[M, K], B: int32[K, N]) -> int32[M, N]:
         C: int32[M, N] = 0
-        for i, j, k in hcl.grid(M, N, K):
-            C[i, j] += A[i, k] * B[k, j]
+        for i, j in hcl.grid(M, N):
+            for k in hcl.reduction(K):
+                C[i, j] += A[i, k] * B[k, j]
         return C
 
     def top(A: int32[M, K], B: int32[K, N]) -> int32[M, N]:
@@ -248,6 +256,16 @@ def test_nested_functions():
         D = matrix_add(C)
         return D
 
+    s1 = hcl.customize(gemm)
+    s1.reorder("k", "j")
+    s1.buffer_at(gemm.C, axis="i")
+    s1.pipeline("j")
+    print(s1.module)
+    # Top-level
+    s = hcl.customize(top)
+    s.compose(s1)
+    print(s.module)
+    sys.exit()
     # Separate compilation (just for testing)
     s_gemm = hcl.customize(gemm)
     mod_gemm = s_gemm.build()
