@@ -21,6 +21,7 @@ from hcl_mlir.dialects import (
     hcl as hcl_d,
     memref as memref_d,
     func as func_d,
+    affine as affine_d,
 )
 from hcl_mlir.exceptions import (
     HCLValueError,
@@ -118,10 +119,19 @@ class Schedule:
         return str(self.module)
 
     def get_loops(self):
-        res = []
-        for loops in get_affine_loop_nests(self.top_func):
-            res.append({StringAttr(item["name"]).value: item["body"] for item in loops})
-        return res
+        def DFS(operations):
+            for op in operations:
+                if isinstance(op, affine_d.AffineForOp):
+                    band[StringAttr(op.attributes["loop_name"]).value] = op
+                    DFS(op.body.operations)
+
+        results = []
+        for op in self.top_func.entry_block.operations:
+            if isinstance(op, affine_d.AffineForOp):  # outer-most
+                band = {StringAttr(op.attributes["loop_name"]).value: op}
+                DFS(op.body.operations)
+                results.append(band)
+        return results
 
     @wrapped_apply
     def split(self, name, factor):
