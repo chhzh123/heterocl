@@ -59,8 +59,6 @@ def find_loop_in_bands(func, axis):
     else:  # axis is a string
         axis_name = axis
         for band in bands:
-            print(func)
-            print(band)
             op_name = None
             for i, loop in enumerate(band):
                 if i == 0:
