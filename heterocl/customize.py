@@ -28,7 +28,6 @@ from hcl_mlir.exceptions import (
 )
 import os
 import ctypes
-from hcl_mlir import get_affine_loop_nests
 from hcl_mlir.passmanager import PassManager
 from hcl_mlir.execution_engine import ExecutionEngine
 from hcl_mlir.runtime import (
@@ -40,7 +39,7 @@ import numpy as np
 
 from .ir.builder import ASTTransformer, ASTContext
 from .context import get_context, set_context, get_location
-from .ir.transform import get_loop_band_names
+from .ir.transform import get_affine_loop_nests, find_loop_in_bands
 from .build_module import _mlir_lower_pipeline
 from .runtime import copy_build_files
 from .module import HCLModule
@@ -119,26 +118,14 @@ class Schedule:
         return str(self.module)
 
     def get_loops(self):
-        def DFS(operations):
-            for op in operations:
-                if isinstance(op, affine_d.AffineForOp):
-                    band[StringAttr(op.attributes["loop_name"]).value] = op
-                    DFS(op.body.operations)
-
-        results = []
-        for op in self.top_func.entry_block.operations:
-            if isinstance(op, affine_d.AffineForOp):  # outer-most
-                band = {StringAttr(op.attributes["loop_name"]).value: op}
-                DFS(op.body.operations)
-                results.append(band)
-        return results
+        return get_affine_loop_nests(self.top_func)
 
     @wrapped_apply
-    def split(self, name, factor):
-        band_name = get_loop_band_names(self.top_func)[0]
+    def split(self, axis, factor):
+        band_name, axis = find_loop_in_bands(self.top_func, axis)
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdl = hcl_d.CreateLoopHandleOp(
-            op_hdl.result, StringAttr.get(name), ip=self.ip
+            op_hdl.result, StringAttr.get(axis), ip=self.ip
         )
         i32 = IntegerType.get_unsigned(32)
         factor = IntegerAttr.get(i32, factor)
@@ -146,10 +133,12 @@ class Schedule:
 
     @wrapped_apply
     def reorder(self, *args):
-        band_name = get_loop_band_names(self.top_func)[0]
+        band_name, _ = find_loop_in_bands(self.top_func, args[0])
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdls = []
         for name in args:
+            if isinstance(name, affine_d.AffineForOp):
+                name = StringAttr(name.attributes["loop_name"]).value
             loop_hdls.append(
                 hcl_d.CreateLoopHandleOp(
                     op_hdl.result, StringAttr.get(name), ip=self.ip
@@ -159,11 +148,11 @@ class Schedule:
         hcl_d.ReorderOp(arg_results, ip=self.ip)
 
     @wrapped_apply
-    def unroll(self, name, factor=0):
-        band_name = get_loop_band_names(self.top_func)[0]
+    def unroll(self, axis, factor=0):
+        band_name, axis = find_loop_in_bands(self.top_func, axis)
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdl = hcl_d.CreateLoopHandleOp(
-            op_hdl.result, StringAttr.get(name), ip=self.ip
+            op_hdl.result, StringAttr.get(axis), ip=self.ip
         )
         i32 = IntegerType.get_unsigned(32)
         factor = IntegerAttr.get(i32, factor)
@@ -171,10 +160,12 @@ class Schedule:
 
     @wrapped_apply
     def fuse(self, *args):
-        band_name = get_loop_band_names(self.top_func)[0]
+        band_name, _ = find_loop_in_bands(self.top_func, args[0])
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdls = []
         for name in args:
+            if isinstance(name, affine_d.AffineForOp):
+                name = StringAttr(name.attributes["loop_name"]).value
             loop_hdls.append(
                 hcl_d.CreateLoopHandleOp(
                     op_hdl.result, StringAttr.get(name), ip=self.ip
@@ -213,8 +204,8 @@ class Schedule:
         )
 
     @wrapped_apply
-    def buffer_at(self, target, axis: str):
-        band_name = get_loop_band_names(self.top_func)[0]
+    def buffer_at(self, target, axis):
+        band_name, axis = find_loop_in_bands(self.top_func, axis)
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdl = hcl_d.CreateLoopHandleOp(
             op_hdl.result, StringAttr.get(axis), ip=self.ip
@@ -232,7 +223,7 @@ class Schedule:
     def pipeline(self, axis, initiation_interval=1):
         i32 = IntegerType.get_unsigned(32)
         ii = IntegerAttr.get(i32, initiation_interval)
-        band_name = get_loop_band_names(self.top_func)[0]
+        band_name, axis = find_loop_in_bands(self.top_func, axis)
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdl = hcl_d.CreateLoopHandleOp(
             op_hdl.result, StringAttr.get(axis), ip=self.ip
@@ -241,7 +232,7 @@ class Schedule:
 
     @wrapped_apply
     def parallel(self, axis):
-        band_name = get_loop_band_names(self.top_func)[0]
+        band_name, axis = find_loop_in_bands(self.top_func, axis)
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdl = hcl_d.CreateLoopHandleOp(
             op_hdl.result, StringAttr.get(axis), ip=self.ip
@@ -250,33 +241,20 @@ class Schedule:
 
     @wrapped_apply
     def compute_at(self, from_loop, target_loop):
-        bands = get_affine_loop_nests(self.top_func)
-        from_band, target_band = None, None
-        for band in bands:
-            if "op_name" in band[0]["body"].attributes:
-                op_name = band[0]["body"].attributes["op_name"]
-            else:
-                op_name = ""
-            for loop in band:
-                loop = loop["body"]
-                if loop == from_loop:
-                    from_band = StringAttr(op_name)
-                    from_loop = StringAttr(loop.attributes["loop_name"])
-                elif loop == target_loop:
-                    target_band = StringAttr(op_name)
-                    target_loop = StringAttr(loop.attributes["loop_name"])
-        if target_band is None:
-            raise RuntimeError("Target loop not found")
+        from_band, _ = find_loop_in_bands(self.top_func, from_loop)
+        target_band, target_axis = find_loop_in_bands(self.top_func, target_loop)
         from_hdl = hcl_d.CreateOpHandleOp(from_band, ip=self.ip)
         target_hdl = hcl_d.CreateOpHandleOp(target_band, ip=self.ip)
-        loop_hdl = hcl_d.CreateLoopHandleOp(target_hdl.result, target_loop, ip=self.ip)
+        loop_hdl = hcl_d.CreateLoopHandleOp(
+            target_hdl.result, StringAttr.get(target_axis), ip=self.ip
+        )
         hcl_d.ComputeAtOp(
             from_hdl.result, target_hdl.result, loop_hdl.result, ip=self.ip
         )
 
     @wrapped_apply
     def reuse_at(self, target, axis):
-        band_name = get_loop_band_names(self.top_func)[0]
+        band_name, axis = find_loop_in_bands(self.top_func, axis)
         op_hdl = hcl_d.CreateOpHandleOp(band_name, ip=self.ip)
         loop_hdl = hcl_d.CreateLoopHandleOp(
             op_hdl.result, StringAttr.get(axis), ip=self.ip

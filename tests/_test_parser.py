@@ -458,6 +458,57 @@ def test_index_arg():
     print(s.module)
 
 
+def test_compute_at():
+    def kernel(A: int32[10, 20, 30]) -> int32[10, 20, 30]:
+        B: int32[10, 20, 30] = 0
+        for i, j, m in hcl.grid(10, 20, 30):
+            B[i, j, m] = A[i, j, m] * 2
+
+        C: int32[10, 20, 30] = 0
+        for ii, jj, mm in hcl.grid(10, 20, 30):
+            C[ii, jj, mm] = B[ii, jj, mm] + 1
+        return C
+
+    # axis 2
+    s2 = hcl.customize(kernel)
+    loops = s2.get_loops()
+    s2.compute_at(loops[0].m, loops[1].mm)
+    # _verify_build(s2)
+    print(s2.module)
+    print(s2.build("vhls"))
+
+
+def test_imperfect_loops():
+    M, K, N = 32, 32, 32
+
+    def gemm(inp: float32[M, K], W: float32[K, N], B: float32[N]) -> float32[M, N]:
+        outp: float32[M, N] = 0.0
+        for i in range(M):
+            for j in range(N):
+                for k in hcl.reduction(K):
+                    outp[i, j] += inp[i, k] * W[k, j]
+                for j0 in range(N):
+                    outp[i, j0] = B[j0]
+        return outp
+
+    s = hcl.customize(gemm)
+    loops = s.get_loops()
+    s.split(loops[0].i, 8)
+    print(s.module)
+    loops = s.get_loops()
+    s.reorder(loops[0]["i.outer"], loops[0].j, loops[0]["i.inner"])
+    s.unroll(loops[0].k)
+    print(s.module)
+    s.fuse(loops[0]["i.outer"], loops[0].j)
+    s.pipeline(loops[0].j0)
+    print(s.build("vhls"))
+
+    s1 = hcl.customize(gemm)
+    s1.pipeline("j0")
+    s1.unroll("j0")
+    print(s1.build("vhls"))
+
+
 if __name__ == "__main__":
     test_gemm_grid_for()
     test_gemm_range_for()
@@ -477,5 +528,7 @@ if __name__ == "__main__":
     test_llvm_arg()
     test_index_arg()
     test_fcompute_wrap_more()
+    test_compute_at()
+    test_imperfect_loops()
 
 sys.exit()

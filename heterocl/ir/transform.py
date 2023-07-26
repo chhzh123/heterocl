@@ -4,8 +4,35 @@
 
 import hcl_mlir
 from hcl_mlir import UnitAttr, StringAttr, InsertionPoint, MemRefType
-from hcl_mlir.dialects import memref as memref_d
-from hcl_mlir.dialects import affine as affine_d
+from hcl_mlir.dialects import (
+    memref as memref_d,
+    affine as affine_d,
+    scf as scf_d,
+)
+
+
+class LoopBand:
+    def __init__(self):
+        """
+        Loops will be directly attached to this class as an attribute
+        """
+        self.loops = {}
+
+    def add_loop(self, name, loop):
+        self.loops[name] = loop
+        self.__setattr__(name, loop)
+
+    def __repr__(self):
+        return "LoopBand({})".format(self.loops)
+
+    def __iter__(self):
+        return self.loops.items().__iter__()
+
+    def __getitem__(self, name):
+        if name in self.loops:
+            return self.loops[name]
+        else:
+            raise AttributeError(f"No such loop {name}")
 
 
 def get_loop_band_names(func):
@@ -16,12 +43,68 @@ def get_loop_band_names(func):
     return results
 
 
+def find_loop_in_bands(func, axis):
+    results = []
+    bands = get_affine_loop_nests(func)
+    if isinstance(axis, affine_d.AffineForOp):
+        axis_name = StringAttr(axis.attributes["loop_name"]).value
+        for band in bands:
+            op_name = None
+            for i, loop in enumerate(band):
+                if i == 0:
+                    op_name = loop[1].attributes["op_name"]
+                if loop[1] == axis:
+                    return op_name, axis_name
+        raise RuntimeError("Cannot find the band of loop {}".format(axis_name))
+    else:  # axis is a string
+        axis_name = axis
+        for band in bands:
+            print(func)
+            print(band)
+            op_name = None
+            for i, loop in enumerate(band):
+                if i == 0:
+                    op_name = loop[1].attributes["op_name"]
+                if loop[0] == axis_name:
+                    results.append(op_name)
+        if len(results) == 0:
+            raise RuntimeError("Cannot find the band of loop {}".format(axis_name))
+        elif len(results) > 1:
+            raise RuntimeError(
+                "Find multiple bands containing loop {}".format(axis_name)
+            )
+        return results[0], axis_name
+
+
 def get_affine_loop_nests(func):
-    loops = hcl_mlir.get_affine_loop_nests(func)
-    res = []
-    for loop in loops:
-        res.append([(item["name"], item["body"]) for item in loop])
-    return res
+    cnt_unnamed = 0
+
+    def DFS(operations, band):
+        nonlocal cnt_unnamed
+        for op in operations:
+            if isinstance(op, affine_d.AffineForOp):
+                if "loop_name" not in op.attributes:
+                    name = f"L_{cnt_unnamed}"
+                    cnt_unnamed += 1
+                else:
+                    name = StringAttr(op.attributes["loop_name"]).value
+                band.add_loop(name, op)
+                DFS(op.body.operations, band)
+            elif isinstance(op, (affine_d.AffineIfOp, scf_d.IfOp)):
+                DFS(op.then_block.operations, band)
+                try:
+                    DFS(op.else_block.operations, band)
+                except IndexError:
+                    pass
+
+    results = []
+    for op in func.entry_block.operations:
+        if isinstance(op, affine_d.AffineForOp):  # outer-most
+            band = LoopBand()
+            band.add_loop(StringAttr(op.attributes["loop_name"]).value, op)
+            DFS(op.body.operations, band)
+            results.append(band)
+    return results
 
 
 def annotate(op, name):
